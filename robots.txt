@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /analytics.html
+
+Sitemap: https://aerlock.io/sitemap.xml

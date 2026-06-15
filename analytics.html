@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<meta name="robots" content="noindex, nofollow"/>
+<title>AERLOCK — Telemetry Console</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 fill=%22%230c1324%22/><circle cx=%2250%22 cy=%2250%22 r=%2230%22 fill=%22none%22 stroke=%22%2300f0ff%22 stroke-width=%226%22/></svg>"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Anybody:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: { extend: {
+            colors: {
+                "background": "#0c1324", "surface": "#0c1324", "primary": "#dbfcff",
+                "primary-container": "#00f0ff", "primary-fixed": "#7df4ff", "primary-fixed-dim": "#00dbe9",
+                "on-primary-container": "#006970", "on-surface": "#dce1fb", "on-surface-variant": "#b9cacb",
+                "on-background": "#dce1fb", "outline-variant": "#3b494b", "outline": "#849495",
+                "surface-container": "#191f31", "surface-container-low": "#151b2d", "surface-container-high": "#23293c",
+                "surface-container-highest": "#2e3447", "surface-container-lowest": "#070d1f",
+                "error": "#ffb4ab", "secondary": "#b6c8de"
+            },
+            borderRadius: { "DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "0px" },
+            spacing: { "margin": "24px", "container-max": "1440px" },
+            fontFamily: {
+                "headline-lg": ["Anybody"], "headline-md": ["Anybody"], "headline-sm": ["Anybody"],
+                "body-lg": ["Space Grotesk", "JetBrains Mono"], "body-md": ["Space Grotesk", "JetBrains Mono"],
+                "label-md": ["JetBrains Mono"], "label-sm": ["JetBrains Mono"], "tech-data": ["JetBrains Mono"]
+            },
+            fontSize: {
+                "headline-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                "headline-md": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                "headline-sm": ["24px", { "lineHeight": "1.2", "fontWeight": "600" }],
+                "body-lg": ["16px", { "lineHeight": "1.5" }], "body-md": ["14px", { "lineHeight": "1.5" }],
+                "label-md": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                "label-sm": ["10px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }]
+            }
+        }}
+    }
+</script>
+<style>
+    body {
+        background-color: theme('colors.background'); color: theme('colors.on-background');
+        background-image: linear-gradient(theme('colors.surface-container-highest') 1px, transparent 1px),
+                          linear-gradient(90deg, theme('colors.surface-container-highest') 1px, transparent 1px);
+        background-size: 32px 32px; background-position: center top;
+    }
+    .aerlock-border { border: 1px solid rgba(255,255,255,0.1); }
+    .aerlock-recessed { background: rgba(0,0,0,0.2); box-shadow: inset 0 0 10px rgba(0,0,0,0.5); border: 1px solid theme('colors.outline-variant'); }
+    .aerlock-glow { box-shadow: 0 0 8px theme('colors.primary-fixed-dim'); }
+    .crt-line { position: absolute; top: 0; left: 0; right: 0; height: 1px; background: rgba(0,240,255,0.2); animation: scan 8s linear infinite; z-index: 50; pointer-events: none; }
+    @keyframes scan { 0% { transform: translateY(0); } 100% { transform: translateY(100vh); } }
+    .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+    .bar-fill { transition: width 0.8s cubic-bezier(0.16,1,0.3,1); }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: theme('colors.surface-container-lowest'); }
+    ::-webkit-scrollbar-thumb { background: theme('colors.outline-variant'); border: 2px solid theme('colors.surface-container-lowest'); }
+    ::-webkit-scrollbar-thumb:hover { background: theme('colors.primary-container'); }
+</style>
+</head>
+<body class="min-h-screen flex flex-col relative overflow-x-hidden selection:bg-primary-container selection:text-on-primary-container">
+<div class="crt-line"></div>
+<!-- Header -->
+<header class="fixed top-0 w-full z-40 border-b border-white/10 bg-surface/95 backdrop-blur-sm h-16">
+<div class="flex justify-between items-center w-full px-margin max-w-container-max mx-auto h-full">
+<div class="flex items-center gap-3">
+<a href="index.html" class="font-headline-sm text-headline-sm font-bold tracking-widest text-primary-fixed hover:text-primary transition-colors">AERLOCK</a>
+<span class="text-on-surface-variant font-label-sm text-label-sm hidden sm:inline">/ TELEMETRY CONSOLE</span>
+</div>
+<nav class="flex gap-2 sm:gap-3 items-center">
+<span id="live-dot" class="w-2 h-2 rounded-full bg-primary-container aerlock-glow animate-pulse"></span>
+<button id="btn-refresh" class="bg-transparent text-primary font-label-md text-label-md px-3 py-2 aerlock-border hover:bg-surface-container-high transition-colors flex items-center gap-1"><span class="material-symbols-outlined" style="font-size:18px">refresh</span><span class="hidden sm:inline">REFRESH</span></button>
+<button id="btn-csv" class="bg-transparent text-primary font-label-md text-label-md px-3 py-2 aerlock-border hover:bg-surface-container-high transition-colors hidden sm:flex items-center gap-1"><span class="material-symbols-outlined" style="font-size:18px">download</span>CSV</button>
+<button id="btn-json" class="bg-transparent text-primary font-label-md text-label-md px-3 py-2 aerlock-border hover:bg-surface-container-high transition-colors hidden sm:flex items-center gap-1"><span class="material-symbols-outlined" style="font-size:18px">data_object</span>JSON</button>
+<button id="btn-clear" class="bg-transparent text-error font-label-md text-label-md px-3 py-2 aerlock-border hover:bg-surface-container-high transition-colors flex items-center gap-1"><span class="material-symbols-outlined" style="font-size:18px">delete</span><span class="hidden sm:inline">PURGE</span></button>
+</nav>
+</div>
+</header>
+
+<main class="flex-grow pt-24 pb-16 px-margin max-w-container-max mx-auto w-full flex flex-col gap-12">
+
+<!-- Title -->
+<section class="flex flex-col gap-2">
+<div class="font-label-sm text-label-sm text-primary tracking-widest uppercase">Mission Control</div>
+<h1 class="font-headline-md text-headline-md text-on-surface uppercase">User Journey Telemetry</h1>
+<p class="font-body-md text-on-surface-variant max-w-2xl">Locally-aggregated visitor signals captured by the AERLOCK tracker. No cookies, no third parties — data is read from this browser's storage. <span id="auto-note" class="text-primary-fixed-dim"></span></p>
+</section>
+
+<!-- KPI grid -->
+<section class="grid grid-cols-2 lg:grid-cols-5 gap-4" id="kpi-grid"></section>
+
+<!-- Funnel + Top interactions -->
+<section class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+<div class="aerlock-border bg-surface-container p-6 flex flex-col gap-4">
+<div class="flex items-center justify-between border-b border-outline-variant pb-3">
+<h2 class="font-headline-sm text-headline-sm text-on-surface uppercase">Section Funnel</h2>
+<span class="font-label-sm text-on-surface-variant uppercase tracking-widest">reach &amp; drop-off</span>
+</div>
+<div id="funnel" class="flex flex-col gap-3"></div>
+</div>
+<div class="aerlock-border bg-surface-container p-6 flex flex-col gap-4">
+<div class="flex items-center justify-between border-b border-outline-variant pb-3">
+<h2 class="font-headline-sm text-headline-sm text-on-surface uppercase">Top Interactions</h2>
+<span class="font-label-sm text-on-surface-variant uppercase tracking-widest">click events</span>
+</div>
+<div id="interactions" class="flex flex-col gap-3"></div>
+</div>
+</section>
+
+<!-- Scroll depth + Sources -->
+<section class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+<div class="aerlock-border bg-surface-container p-6 flex flex-col gap-4">
+<div class="flex items-center justify-between border-b border-outline-variant pb-3">
+<h2 class="font-headline-sm text-headline-sm text-on-surface uppercase">Scroll Depth</h2>
+<span class="font-label-sm text-on-surface-variant uppercase tracking-widest">sessions reaching</span>
+</div>
+<div id="scroll-depth" class="flex flex-col gap-3"></div>
+</div>
+<div class="aerlock-border bg-surface-container p-6 flex flex-col gap-4">
+<div class="flex items-center justify-between border-b border-outline-variant pb-3">
+<h2 class="font-headline-sm text-headline-sm text-on-surface uppercase">Traffic Sources</h2>
+<span class="font-label-sm text-on-surface-variant uppercase tracking-widest">referrers</span>
+</div>
+<div id="sources" class="flex flex-col gap-3"></div>
+</div>
+</section>
+
+<!-- Event log -->
+<section class="aerlock-border bg-surface-container overflow-hidden flex flex-col">
+<div class="flex items-center justify-between border-b border-outline-variant p-6 bg-surface-container-high">
+<h2 class="font-headline-sm text-headline-sm text-on-surface uppercase">Raw Event Stream</h2>
+<input id="log-filter" type="text" placeholder="filter type / label…" class="bg-surface aerlock-border text-on-surface font-label-md text-label-md px-3 py-1.5 w-48 focus:border-primary-container focus:ring-0"/>
+</div>
+<div class="overflow-x-auto max-h-[460px] overflow-y-auto">
+<table class="w-full text-left border-collapse">
+<thead class="sticky top-0 bg-surface-container-high z-10">
+<tr class="border-b border-outline-variant">
+<th class="p-3 px-6 font-label-sm text-on-surface-variant uppercase tracking-widest">Time</th>
+<th class="p-3 px-6 font-label-sm text-on-surface-variant uppercase tracking-widest">Type</th>
+<th class="p-3 px-6 font-label-sm text-on-surface-variant uppercase tracking-widest">Detail</th>
+<th class="p-3 px-6 font-label-sm text-on-surface-variant uppercase tracking-widest">Session</th>
+</tr>
+</thead>
+<tbody id="log-body"></tbody>
+</table>
+</div>
+</section>
+
+<!-- Empty state -->
+<section id="empty-state" class="hidden aerlock-recessed p-16 flex-col items-center justify-center gap-4 text-center">
+<span class="material-symbols-outlined text-primary" style="font-size:64px">satellite_alt</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface uppercase">No Signal Acquired</h2>
+<p class="font-body-md text-on-surface-variant max-w-md">No telemetry has been captured in this browser yet. Visit the <a href="index.html" class="text-primary-container underline">landing page</a>, interact with it, then return here.</p>
+</section>
+
+</main>
+
+<footer class="bg-surface-container-lowest border-t border-white/10 w-full mt-auto">
+<div class="px-margin py-6 max-w-container-max mx-auto w-full flex flex-col sm:flex-row justify-between gap-2">
+<div class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">AERLOCK TELEMETRY · LOCAL AGGREGATION</div>
+<div class="font-label-sm text-label-sm text-on-surface-variant" id="footer-meta"></div>
+</div>
+</footer>
+
+<script>
+/* ============================================================================
+   Telemetry Console renderer — reads the localStorage buffer written by
+   js/aerlock-analytics.js and visualises it. Pure vanilla, no deps.
+   ========================================================================== */
+(function () {
+  "use strict";
+  var STORE_KEY = "aerlock.analytics.events.v1";
+
+  function load() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; }
+    catch (e) { return []; }
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function fmtTime(ts) {
+    var d = new Date(ts);
+    return d.toLocaleString("en-GB", { hour12: false });
+  }
+
+  function fmtDur(ms) {
+    if (!ms) return "0s";
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + "s";
+    var m = Math.floor(s / 60);
+    return m + "m " + (s % 60) + "s";
+  }
+
+  function bar(label, value, max, sub, color) {
+    var pct = max > 0 ? Math.round((value / max) * 100) : 0;
+    color = color || "bg-primary-container";
+    return '<div class="flex flex-col gap-1">' +
+      '<div class="flex justify-between items-baseline gap-2">' +
+        '<span class="font-body-md text-on-surface text-sm truncate" title="' + esc(label) + '">' + esc(label) + '</span>' +
+        '<span class="font-tech-data text-primary text-sm whitespace-nowrap">' + esc(sub != null ? sub : value) + '</span>' +
+      '</div>' +
+      '<div class="aerlock-recessed h-3 w-full"><div class="bar-fill h-full ' + color + '" style="width:' + pct + '%"></div></div>' +
+    '</div>';
+  }
+
+  function kpi(label, value, sub) {
+    return '<div class="aerlock-border bg-surface p-4 flex flex-col gap-1 border-l-4 border-l-primary-container">' +
+      '<div class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">' + esc(label) + '</div>' +
+      '<div class="font-tech-data text-headline-sm font-bold text-primary">' + esc(value) + '</div>' +
+      '<div class="font-label-sm text-primary-fixed-dim uppercase">' + esc(sub) + '</div>' +
+    '</div>';
+  }
+
+  function groupCount(events, type, keyFn) {
+    var map = {};
+    events.forEach(function (e) {
+      if (type && e.type !== type) return;
+      var k = keyFn(e);
+      if (k == null) return;
+      map[k] = (map[k] || 0) + 1;
+    });
+    return map;
+  }
+
+  function sortedEntries(map) {
+    return Object.keys(map).map(function (k) { return [k, map[k]]; })
+      .sort(function (a, b) { return b[1] - a[1]; });
+  }
+
+  function render() {
+    var events = load();
+    var empty = document.getElementById("empty-state");
+    if (!events.length) { empty.classList.remove("hidden"); empty.classList.add("flex"); }
+    else { empty.classList.add("hidden"); empty.classList.remove("flex"); }
+
+    var sessions = {};
+    events.forEach(function (e) { sessions[e.session] = true; });
+    var sessionCount = Object.keys(sessions).length;
+    var pageviews = events.filter(function (e) { return e.type === "pageview"; });
+    var exits = events.filter(function (e) { return e.type === "page_exit"; });
+    var avgActive = exits.length
+      ? exits.reduce(function (a, e) { return a + (e.props.activeMs || 0); }, 0) / exits.length : 0;
+    var paths = {};
+    pageviews.forEach(function (e) { paths[e.path] = true; });
+
+    /* KPI grid */
+    document.getElementById("kpi-grid").innerHTML =
+      kpi("Sessions", sessionCount, "unique") +
+      kpi("Pageviews", pageviews.length, "total") +
+      kpi("Events", events.length, "captured") +
+      kpi("Avg. Dwell", fmtDur(avgActive), "active time") +
+      kpi("Paths", Object.keys(paths).length, "distinct");
+
+    /* Section funnel — ordered by first appearance, with drop-off vs top */
+    var secMap = groupCount(events, "section_view", function (e) { return e.props.name; });
+    // preserve discovery order using min order value
+    var order = {};
+    events.forEach(function (e) {
+      if (e.type === "section_view" && order[e.props.name] == null) order[e.props.name] = e.props.order;
+    });
+    var secEntries = Object.keys(secMap).sort(function (a, b) {
+      return (order[a] || 0) - (order[b] || 0);
+    });
+    var funnel = document.getElementById("funnel");
+    if (!secEntries.length) {
+      funnel.innerHTML = '<div class="font-body-md text-on-surface-variant text-sm">No section views recorded.</div>';
+    } else {
+      var top = secMap[secEntries[0]];
+      funnel.innerHTML = secEntries.map(function (name) {
+        var v = secMap[name];
+        var retention = top > 0 ? Math.round((v / top) * 100) : 0;
+        return bar(name, v, top, v + " · " + retention + "%");
+      }).join("");
+    }
+
+    /* Top interactions (clicks) */
+    var clickMap = groupCount(events, "click", function (e) { return e.props.label; });
+    var clickEntries = sortedEntries(clickMap).slice(0, 8);
+    var inter = document.getElementById("interactions");
+    if (!clickEntries.length) {
+      inter.innerHTML = '<div class="font-body-md text-on-surface-variant text-sm">No interactions recorded.</div>';
+    } else {
+      var cmax = clickEntries[0][1];
+      inter.innerHTML = clickEntries.map(function (en) { return bar(en[0], en[1], cmax); }).join("");
+    }
+
+    /* Scroll depth distribution (sessions reaching each mark) */
+    var depthSessions = { 25: {}, 50: {}, 75: {}, 100: {} };
+    events.forEach(function (e) {
+      if (e.type === "scroll_depth") depthSessions[e.props.percent][e.session] = true;
+    });
+    var sd = document.getElementById("scroll-depth");
+    var sdMax = sessionCount || 1;
+    sd.innerHTML = [25, 50, 75, 100].map(function (m) {
+      var n = Object.keys(depthSessions[m]).length;
+      var pct = sessionCount ? Math.round((n / sessionCount) * 100) : 0;
+      return bar(m + "% of page", n, sdMax, n + " · " + pct + "%");
+    }).join("");
+
+    /* Traffic sources (referrers from pageviews) */
+    var refMap = groupCount(events, "pageview", function (e) { return e.props.referrer || "(direct)"; });
+    var refEntries = sortedEntries(refMap).slice(0, 6);
+    var sources = document.getElementById("sources");
+    if (!refEntries.length) {
+      sources.innerHTML = '<div class="font-body-md text-on-surface-variant text-sm">No source data.</div>';
+    } else {
+      var rmax = refEntries[0][1];
+      sources.innerHTML = refEntries.map(function (en) {
+        var label = en[0].replace(/^https?:\/\//, "").slice(0, 40);
+        return bar(label, en[1], rmax);
+      }).join("");
+    }
+
+    /* Event log */
+    renderLog(events);
+
+    document.getElementById("footer-meta").textContent =
+      events.length + " events · " + sessionCount + " sessions";
+  }
+
+  var TYPE_COLORS = {
+    pageview: "text-primary-container", click: "text-primary",
+    section_view: "text-secondary", scroll_depth: "text-on-surface-variant",
+    page_exit: "text-error"
+  };
+
+  function detailOf(e) {
+    var p = e.props || {};
+    switch (e.type) {
+      case "pageview": return (p.referrer || "") + " · " + (p.viewport || "");
+      case "click": return p.label + (p.href ? " → " + p.href : "");
+      case "section_view": return p.name;
+      case "scroll_depth": return p.percent + "%";
+      case "page_exit": return "active " + fmtDur(p.activeMs);
+      default: return JSON.stringify(p);
+    }
+  }
+
+  function renderLog(events) {
+    var filter = (document.getElementById("log-filter").value || "").toLowerCase();
+    var rows = events.slice().reverse().filter(function (e) {
+      if (!filter) return true;
+      return (e.type + " " + detailOf(e)).toLowerCase().indexOf(filter) !== -1;
+    }).slice(0, 300);
+    var body = document.getElementById("log-body");
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="4" class="p-6 font-body-md text-on-surface-variant text-sm">No matching events.</td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map(function (e) {
+      var color = TYPE_COLORS[e.type] || "text-on-surface";
+      return '<tr class="border-b border-outline-variant/50 hover:bg-surface-container-high transition-colors">' +
+        '<td class="p-3 px-6 font-tech-data text-on-surface-variant text-xs whitespace-nowrap">' + esc(fmtTime(e.ts)) + '</td>' +
+        '<td class="p-3 px-6 font-label-md text-label-md ' + color + ' uppercase whitespace-nowrap">' + esc(e.type) + '</td>' +
+        '<td class="p-3 px-6 font-body-md text-on-surface text-sm max-w-[420px] truncate" title="' + esc(detailOf(e)) + '">' + esc(detailOf(e)) + '</td>' +
+        '<td class="p-3 px-6 font-tech-data text-on-surface-variant text-xs">' + esc(e.session) + '</td>' +
+      '</tr>';
+    }).join("");
+  }
+
+  /* ----------------------------------------------------------- exports */
+  function download(filename, text, mime) {
+    var blob = new Blob([text], { type: mime });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function toCSV(events) {
+    var head = ["id", "ts", "iso", "type", "session", "path", "detail"];
+    var lines = [head.join(",")];
+    events.forEach(function (e) {
+      var row = [e.id, e.ts, new Date(e.ts).toISOString(), e.type, e.session, e.path, detailOf(e)]
+        .map(function (v) { return '"' + String(v).replace(/"/g, '""') + '"'; });
+      lines.push(row.join(","));
+    });
+    return lines.join("\n");
+  }
+
+  /* ----------------------------------------------------------- wiring */
+  document.getElementById("btn-refresh").addEventListener("click", render);
+  document.getElementById("btn-csv").addEventListener("click", function () {
+    download("aerlock-telemetry.csv", toCSV(load()), "text/csv");
+  });
+  document.getElementById("btn-json").addEventListener("click", function () {
+    download("aerlock-telemetry.json", JSON.stringify(load(), null, 2), "application/json");
+  });
+  document.getElementById("btn-clear").addEventListener("click", function () {
+    if (confirm("Purge all locally-captured telemetry? This cannot be undone.")) {
+      localStorage.removeItem(STORE_KEY);
+      render();
+    }
+  });
+  document.getElementById("log-filter").addEventListener("input", function () {
+    renderLog(load());
+  });
+
+  // Live updates: refresh when the tracker writes from another tab.
+  window.addEventListener("storage", function (e) {
+    if (e.key === STORE_KEY) render();
+  });
+  // Periodic soft-refresh so an open console reflects the latest counts.
+  setInterval(render, 5000);
+  document.getElementById("auto-note").textContent = "Auto-refreshes every 5s.";
+
+  render();
+})();
+</script>
+</body></html>
