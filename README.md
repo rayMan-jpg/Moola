@@ -2,30 +2,37 @@
 
 A static landing page for AERLOCK, a (fictional) high-altitude security /
 zero-knowledge custody protocol. Aviation-HUD / CRT-terminal aesthetic built on
-Tailwind (CDN) with a self-contained, privacy-respecting analytics layer.
+Tailwind (precompiled, self-hosted) with a self-contained, privacy-respecting
+analytics layer.
+
+> **Building the DApp or deploying?** See [`HANDOFF.md`](./HANDOFF.md) for
+> integration points (app CTA, analytics endpoint, custom events) and hosting.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `index.html` | The landing page. Original design preserved; aesthetic enhancements added (boot sequence, decrypt headline, radar dial, animated telemetry counters, scroll reveals, grain/vignette, live UTC clock). |
+| `index.html` | The landing page. Original design preserved; aesthetic enhancements added (boot sequence, decrypt headline, radar dial, animated telemetry counters, scroll reveals, grain/vignette, live UTC clock, mobile nav). |
 | `analytics.html` | **Telemetry Console** — the separate dashboard for viewing captured user-journey data. `noindex`. |
+| `src/input.css` → `dist/aerlock.css` | Tailwind source and compiled stylesheet (replaces the Play CDN). |
+| `tailwind.config.js` | Theme tokens. |
 | `js/aerlock.js` | Front-end aesthetic behaviours. |
 | `js/aerlock-analytics.js` | The journey tracker (loaded on the landing page). |
+| `favicon.*`, `og-image.png`, `site.webmanifest` | Icons + social share card. |
 | `robots.txt`, `sitemap.xml` | SEO crawl directives. |
 
 ## Running locally
 
-It's a static site — serve the folder with any static server:
-
 ```bash
-python3 -m http.server 8000
-# open http://localhost:8000/        (landing page)
-# open http://localhost:8000/analytics.html  (telemetry console)
+npm install          # one time — installs Tailwind
+npm run build        # compile dist/aerlock.css
+npm run serve        # static server on :8080
+# open http://localhost:8080/               (landing page)
+# open http://localhost:8080/analytics.html (telemetry console)
 ```
 
-A server (rather than `file://`) is recommended so `localStorage` shares one
-origin between the two pages.
+Use `npm run watch` to rebuild CSS on change. Serve over HTTP (not `file://`) so
+`localStorage` shares one origin between the two pages.
 
 ## SEO
 
