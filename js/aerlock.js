@@ -5,7 +5,20 @@
 (function () {
   "use strict";
 
+  // Signal that JS is running so CSS can arm effects that would otherwise hide
+  // content (reveal-on-scroll). If this script never loads, sections stay
+  // visible instead of being stuck at opacity:0.
+  document.documentElement.classList.add("aerlock-anim");
+
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var BOOT_SEEN_KEY = "aerlock.boot.seen";
+
+  function seenBoot() {
+    try { return sessionStorage.getItem(BOOT_SEEN_KEY) === "1"; } catch (e) { return false; }
+  }
+  function markBootSeen() {
+    try { sessionStorage.setItem(BOOT_SEEN_KEY, "1"); } catch (e) {}
+  }
 
   /* ---------------------------------------------------------------- Boot seq */
   function runBoot() {
@@ -14,7 +27,9 @@
     var bar = document.getElementById("aerlock-boot-bar");
     if (!boot) return;
 
-    if (reduceMotion) { boot.classList.add("done"); return; }
+    // Skip the sequence on reduced-motion or on repeat visits within the session.
+    if (reduceMotion || seenBoot()) { boot.classList.add("done"); markBootSeen(); return; }
+    markBootSeen();
 
     var lines = [
       "> MOUNTING SECURE PARTITION ........ OK",
@@ -44,6 +59,9 @@
     var glyphs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&@/\\";
     var frame = 0;
     var total = target.length * 3;
+    // Hide the scrambling text from assistive tech while it animates; the true
+    // heading text is exposed via aria-label on the <h1> (see init).
+    el.setAttribute("aria-hidden", "true");
     var timer = setInterval(function () {
       var out = "";
       for (var c = 0; c < target.length; c++) {
@@ -56,7 +74,11 @@
       }
       el.textContent = out;
       frame++;
-      if (frame > total) { clearInterval(timer); el.textContent = target; }
+      if (frame > total) {
+        clearInterval(timer);
+        el.textContent = target;
+        el.removeAttribute("aria-hidden");
+      }
     }, 30);
   }
 
@@ -84,6 +106,16 @@
   function setupObservers() {
     var revealEls = document.querySelectorAll(".aerlock-reveal");
     var counted = {};
+    if (!("IntersectionObserver" in window)) {
+      // No IO support: just reveal everything and run counters.
+      revealEls.forEach(function (el) {
+        el.classList.add("is-visible");
+        el.querySelectorAll("[data-count]").forEach(function (c) {
+          if (!counted[c]) { counted[c] = true; animateCount(c); }
+        });
+      });
+      return;
+    }
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (e) {
         if (!e.isIntersecting) return;
@@ -98,30 +130,20 @@
   }
 
   /* ----------------------------------------------------------- Live clock */
-  function startClock() {
-    var el = document.getElementById("aerlock-clock");
-    if (!el) return;
-    function tick() {
-      var d = new Date();
-      var hh = String(d.getUTCHours()).padStart(2, "0");
-      var mm = String(d.getUTCMinutes()).padStart(2, "0");
-      var ss = String(d.getUTCSeconds()).padStart(2, "0");
-      el.textContent = hh + ":" + mm + ":" + ss + " UTC";
-    }
-    tick();
-    setInterval(tick, 1000);
+  var clockEls, hudX, hudY;
+  function tickClock() {
+    if (!clockEls || !clockEls.length || document.hidden) return;
+    var d = new Date();
+    var hh = String(d.getUTCHours()).padStart(2, "0");
+    var mm = String(d.getUTCMinutes()).padStart(2, "0");
+    var ss = String(d.getUTCSeconds()).padStart(2, "0");
+    var txt = hh + ":" + mm + ":" + ss + " UTC";
+    for (var i = 0; i < clockEls.length; i++) clockEls[i].textContent = txt;
   }
-
-  /* ---------------------------------------------------- Drifting HUD coords */
-  function driftHud() {
-    if (reduceMotion) return;
-    var x = document.getElementById("hud-x");
-    var y = document.getElementById("hud-y");
-    if (!x || !y) return;
-    setInterval(function () {
-      x.textContent = (45 + Math.random()).toFixed(2);
-      y.textContent = (12 + Math.random()).toFixed(2);
-    }, 1800);
+  function tickHud() {
+    if (!hudX || !hudY || document.hidden || reduceMotion) return;
+    hudX.textContent = (45 + Math.random()).toFixed(2);
+    hudY.textContent = (12 + Math.random()).toFixed(2);
   }
 
   /* ----------------------------------------------------- Dial reticle ticks */
@@ -132,17 +154,90 @@
       var t = document.createElement("span");
       t.className = "aerlock-tick";
       t.style.transform = "rotate(" + a + "deg)";
+      t.setAttribute("aria-hidden", "true");
       dial.appendChild(t);
     }
   }
 
+  /* ------------------------------------------- Pause animations when hidden */
+  function setupVisibilityPause() {
+    function apply() {
+      if (document.hidden) {
+        document.documentElement.setAttribute("data-anim-paused", "");
+      } else {
+        document.documentElement.removeAttribute("data-anim-paused");
+        tickClock(); // refresh immediately on return
+      }
+    }
+    document.addEventListener("visibilitychange", apply);
+    apply();
+  }
+
+  /* ------------------------------------------------- Mobile navigation menu */
+  function setupMobileNav() {
+    var btn = document.getElementById("aerlock-menu-btn");
+    var panel = document.getElementById("aerlock-mobile-nav");
+    if (!btn || !panel) return;
+    function setOpen(open) {
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      panel.classList.toggle("hidden", !open);
+      panel.classList.toggle("flex", open);
+    }
+    btn.addEventListener("click", function () {
+      setOpen(btn.getAttribute("aria-expanded") !== "true");
+    });
+    // Close on link tap, Escape, or outside click.
+    panel.addEventListener("click", function (e) { if (e.target.closest("a")) setOpen(false); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") setOpen(false); });
+    document.addEventListener("click", function (e) {
+      if (!panel.contains(e.target) && !btn.contains(e.target)) setOpen(false);
+    });
+  }
+
+  /* ---------------------------------------------------- ENTER VAULT wiring */
+  function setupVaultCta() {
+    var btn = document.getElementById("aerlock-enter-vault");
+    if (!btn) return;
+    var label = btn.querySelector("[data-vault-label]") || btn;
+    var original = label.textContent;
+    var resetTimer = null;
+    btn.addEventListener("click", function () {
+      // Wire the real app by setting window.AERLOCK_APP_URL (see HANDOFF.md).
+      if (window.AERLOCK_APP_URL) { window.location.href = window.AERLOCK_APP_URL; return; }
+      label.textContent = "VAULT ACCESS PENDING";
+      btn.setAttribute("aria-live", "polite");
+      if (resetTimer) clearTimeout(resetTimer);
+      resetTimer = setTimeout(function () { label.textContent = original; }, 2500);
+    });
+  }
+
   /* ------------------------------------------------------------------- Init */
   document.addEventListener("DOMContentLoaded", function () {
+    clockEls = document.querySelectorAll("[data-clock]");
+    hudX = document.getElementById("hud-x");
+    hudY = document.getElementById("hud-y");
+
     runBoot();
+    setupMobileNav();
+    setupVaultCta();
     setupObservers();
-    startClock();
-    driftHud();
     buildTicks();
+    setupVisibilityPause();
+
+    tickClock();
+    setInterval(tickClock, 1000);
+    if (!reduceMotion) setInterval(tickHud, 1800);
+
+    // Expose the true heading text to assistive tech before scrambling begins.
+    document.querySelectorAll("h1").forEach(function (h) {
+      var spans = h.querySelectorAll("[data-decrypt]");
+      if (spans.length) {
+        var real = [];
+        spans.forEach(function (s) { real.push(s.getAttribute("data-decrypt")); });
+        h.setAttribute("aria-label", real.join(" "));
+      }
+    });
+
     document.querySelectorAll("[data-decrypt]").forEach(function (el, idx) {
       setTimeout(function () { decrypt(el); }, 600 + idx * 250);
     });

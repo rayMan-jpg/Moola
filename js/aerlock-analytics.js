@@ -48,12 +48,46 @@
     catch (e) { return []; }
   }
 
-  function writeEvents(list) {
+  // Persist a list, capping by count AND recovering from QuotaExceededError by
+  // evicting the oldest ~20% and retrying — so a full store never wedges into
+  // permanent silent write failure.
+  function persist(list) {
     if (list.length > MAX_EVENTS) list = list.slice(list.length - MAX_EVENTS);
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(list)); } catch (e) {}
+    for (var attempt = 0; attempt < 12 && list.length; attempt++) {
+      try { localStorage.setItem(STORE_KEY, JSON.stringify(list)); return; }
+      catch (e) {
+        var drop = Math.max(1, Math.floor(list.length * 0.2));
+        list = list.slice(drop);
+        if (typeof console !== "undefined") console.warn("[aerlock] telemetry store full; evicted", drop, "oldest events");
+      }
+    }
   }
 
   var SESSION = getSession();
+
+  // In-memory buffer of not-yet-flushed events. Flushing re-reads the current
+  // store and merges (dedupe by id) so concurrent tabs don't clobber each other,
+  // and the whole buffer is serialized once per flush instead of per event.
+  var pending = [];
+  var flushTimer = null;
+
+  function flush() {
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    if (!pending.length) return;
+    var stored = readEvents();
+    var seen = {};
+    for (var i = 0; i < stored.length; i++) seen[stored[i].id] = true;
+    for (var j = 0; j < pending.length; j++) {
+      if (!seen[pending[j].id]) { stored.push(pending[j]); seen[pending[j].id] = true; }
+    }
+    pending = [];
+    persist(stored);
+  }
+
+  function scheduleFlush() {
+    if (flushTimer) return;
+    flushTimer = setTimeout(flush, 800);
+  }
 
   function track(type, props) {
     var ev = {
@@ -64,21 +98,25 @@
       path: location.pathname,
       props: props || {}
     };
-    var list = readEvents();
-    list.push(ev);
-    writeEvents(list);
+    pending.push(ev);
+    scheduleFlush();
 
     if (ENDPOINT && navigator.sendBeacon) {
       try {
-        navigator.sendBeacon(ENDPOINT, new Blob([JSON.stringify(ev)], { type: "application/json" }));
+        // text/plain keeps the beacon a CORS-simple request (no preflight).
+        navigator.sendBeacon(ENDPOINT, new Blob([JSON.stringify(ev)], { type: "text/plain" }));
       } catch (e) {}
     }
     // Expose a hook so other scripts can react to events if desired.
     window.dispatchEvent(new CustomEvent("aerlock:track", { detail: ev }));
+    return ev;
   }
 
   // Public API
   window.aerlockTrack = track;
+  window.aerlockFlush = flush;
+  // Flush buffered events when the tab is backgrounded (most reliable moment).
+  document.addEventListener("visibilitychange", function () { if (document.hidden) flush(); });
 
   /* ------------------------------------------------------------- pageview */
   function utmParams() {
@@ -151,7 +189,10 @@
     function check() {
       var doc = document.documentElement;
       var scrollable = doc.scrollHeight - window.innerHeight;
-      var pct = scrollable > 0 ? Math.round((window.scrollY / scrollable) * 100) : 100;
+      // Don't emit for pages that don't scroll — otherwise a short page would
+      // instantly report 100% and corrupt the "reached depth" metric.
+      if (scrollable <= 0) return;
+      var pct = Math.round((window.scrollY / scrollable) * 100);
       marks.forEach(function (m) {
         if (pct >= m && !hit[m]) { hit[m] = true; track("scroll_depth", { percent: m }); }
       });
@@ -162,22 +203,29 @@
       ticking = true;
       requestAnimationFrame(function () { check(); ticking = false; });
     }, { passive: true });
-    check();
+    // Defer the first measurement until layout has settled.
+    window.addEventListener("load", check);
   }
 
   /* ------------------------------------------------------------ page_exit */
   function trackExit() {
     var active = 0, last = Date.now(), hidden = document.hidden;
+    var exited = false;
     function accrue() { if (!hidden) active += Date.now() - last; last = Date.now(); }
     document.addEventListener("visibilitychange", function () {
       accrue(); hidden = document.hidden; last = Date.now();
     });
-    function flush() {
+    // Shared guard so the exit is recorded at most once even though both
+    // pagehide and beforeunload fire on a typical desktop close/navigate.
+    function onExit() {
+      if (exited) return;
+      exited = true;
       accrue();
       track("page_exit", { activeMs: active, totalMs: Date.now() - SESSION.started });
+      flush();
     }
-    window.addEventListener("pagehide", flush, { once: true });
-    window.addEventListener("beforeunload", flush, { once: true });
+    window.addEventListener("pagehide", onExit);
+    window.addEventListener("beforeunload", onExit);
   }
 
   /* ------------------------------------------------------------------ init */

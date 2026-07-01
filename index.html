@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html class="dark" lang="en"><head>
+<html class="dark no-js" lang="en"><head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <!-- ===================== SEO / Social / Structured Data ===================== -->
@@ -16,309 +16,61 @@
 <meta property="og:description" content="Technical privacy and absolute asset integrity via zero-knowledge sealed vaults."/>
 <meta property="og:url" content="https://aerlock.io/"/>
 <meta property="og:image" content="https://aerlock.io/og-image.png"/>
+<meta property="og:image:width" content="1200"/>
+<meta property="og:image:height" content="630"/>
+<meta property="og:image:alt" content="AERLOCK — Technical Privacy. High-Altitude Security Protocol."/>
 <!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image"/>
 <meta name="twitter:title" content="AERLOCK — High-Altitude Security"/>
 <meta name="twitter:description" content="Technical privacy and absolute asset integrity via zero-knowledge sealed vaults."/>
 <meta name="twitter:image" content="https://aerlock.io/og-image.png"/>
-<title>AERLOCK - High-Altitude Security</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 fill=%22%230c1324%22/><circle cx=%2250%22 cy=%2250%22 r=%2230%22 fill=%22none%22 stroke=%22%2300f0ff%22 stroke-width=%226%22/></svg>"/>
+<meta name="twitter:image:alt" content="AERLOCK — Technical Privacy. High-Altitude Security Protocol."/>
+<title>AERLOCK — High-Altitude Security | Zero-Knowledge Asset Privacy</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg"/>
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png"/>
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png"/>
+<link rel="apple-touch-icon" sizes="180x180" href="favicon-180.png"/>
+<link rel="manifest" href="site.webmanifest"/>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "Organization",
   "name": "AERLOCK SYSTEMS",
   "url": "https://aerlock.io/",
+  "logo": "https://aerlock.io/favicon-512.png",
+  "image": "https://aerlock.io/og-image.png",
   "description": "High-Altitude Security Protocol providing zero-knowledge privacy and absolute asset integrity.",
   "slogan": "Technical Privacy. Absolute Asset Integrity.",
   "knowsAbout": ["Zero-Knowledge Proofs", "Encrypted Custody", "Stealth Addresses", "Asset Privacy"]
 }
 </script>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Anybody:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;family=Space+Grotesk:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
-<script id="tailwind-config">
-        tailwind.config = {
-            darkMode: "class",
-            theme: {
-                extend: {
-                    "colors": {
-                        "tertiary-fixed-dim": "#c1c7cf",
-                        "primary-fixed": "#7df4ff",
-                        "on-primary": "#00363a",
-                        "background": "#0c1324",
-                        "primary-container": "#00f0ff",
-                        "surface": "#0c1324",
-                        "surface-container-highest": "#2e3447",
-                        "on-tertiary": "#2b3137",
-                        "on-surface-variant": "#b9cacb",
-                        "on-secondary-container": "#a5b7cc",
-                        "surface-tint": "#00dbe9",
-                        "on-error-container": "#ffdad6",
-                        "primary": "#dbfcff",
-                        "on-primary-container": "#006970",
-                        "secondary": "#b6c8de",
-                        "on-surface": "#dce1fb",
-                        "on-error": "#690005",
-                        "tertiary-container": "#d4dae2",
-                        "outline-variant": "#3b494b",
-                        "secondary-fixed": "#d2e4fa",
-                        "secondary-fixed-dim": "#b6c8de",
-                        "inverse-on-surface": "#2a3043",
-                        "on-secondary-fixed": "#0a1d2d",
-                        "surface-variant": "#2e3447",
-                        "on-secondary": "#213243",
-                        "on-primary-fixed": "#002022",
-                        "on-primary-fixed-variant": "#004f54",
-                        "surface-container-low": "#151b2d",
-                        "inverse-primary": "#006970",
-                        "outline": "#849495",
-                        "on-secondary-fixed-variant": "#37485a",
-                        "on-background": "#dce1fb",
-                        "error": "#ffb4ab",
-                        "on-tertiary-fixed-variant": "#41474e",
-                        "error-container": "#93000a",
-                        "inverse-surface": "#dce1fb",
-                        "on-tertiary-fixed": "#161c22",
-                        "surface-dim": "#0c1324",
-                        "tertiary-fixed": "#dde3eb",
-                        "secondary-container": "#37485a",
-                        "surface-bright": "#33394c",
-                        "tertiary": "#f1f6ff",
-                        "surface-container-high": "#23293c",
-                        "surface-container-lowest": "#070d1f",
-                        "primary-fixed-dim": "#00dbe9",
-                        "on-tertiary-container": "#595f66",
-                        "surface-container": "#191f31"
-                    },
-                    "borderRadius": {
-                        "DEFAULT": "0px",
-                        "lg": "0px",
-                        "xl": "0px",
-                        "full": "0px"
-                    },
-                    "spacing": {
-                        "margin": "24px",
-                        "gutter": "16px",
-                        "container-max": "1440px",
-                        "unit": "4px"
-                    },
-                    "fontFamily": {
-                        "body-lg": ["Space Grotesk", "JetBrains Mono"],
-                        "headline-lg": ["Anybody"],
-                        "label-sm": ["JetBrains Mono"],
-                        "headline-sm": ["Anybody"],
-                        "headline-md": ["Anybody"],
-                        "body-md": ["Space Grotesk", "JetBrains Mono"],
-                        "label-md": ["JetBrains Mono"],
-                        "tech-data": ["JetBrains Mono"]
-                    },
-                    "fontSize": {
-                        "body-lg": ["16px", { "lineHeight": "1.5", "fontWeight": "400" }],
-                        "headline-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700" }],
-                        "label-sm": ["10px", { "lineHeight": "1.2", "letterSpacing": "0.05em", "fontWeight": "500" }],
-                        "headline-sm": ["24px", { "lineHeight": "1.2", "letterSpacing": "0em", "fontWeight": "600" }],
-                        "headline-md": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "600" }],
-                        "body-md": ["14px", { "lineHeight": "1.5", "fontWeight": "400" }],
-                        "label-md": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }]
-                    }
-                }
-            }
-        }
-    </script>
-<style>
-        body {
-            background-color: theme('colors.background');
-            color: theme('colors.on-background');
-            background-image: linear-gradient(theme('colors.surface-container-highest') 1px, transparent 1px),
-                              linear-gradient(90deg, theme('colors.surface-container-highest') 1px, transparent 1px);
-            background-size: 32px 32px;
-            background-position: center top;
-        }
-
-        .aerlock-glow {
-            box-shadow: 0 0 8px theme('colors.primary-fixed-dim');
-        }
-
-        .aerlock-border {
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .aerlock-recessed {
-            background: rgba(0, 0, 0, 0.2);
-            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
-            border: 1px solid theme('colors.outline-variant');
-        }
-
-        .aerlock-solid-shadow {
-            box-shadow: 4px 4px 0 theme('colors.primary-container');
-        }
-
-        .aerlock-solid-shadow-sm {
-            box-shadow: 2px 2px 0 theme('colors.outline-variant');
-        }
-
-        .crt-line {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 1px;
-            background: rgba(0, 240, 255, 0.2);
-            animation: scan 8s linear infinite;
-            z-index: 50;
-            pointer-events: none;
-        }
-
-        @keyframes scan {
-            0% { transform: translateY(0); }
-            100% { transform: translateY(100vh); }
-        }
-
-        .material-symbols-outlined {
-            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-        }
-        .material-symbols-outlined.filled {
-            font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-        }
-
-        /* ====================================================================
-           AESTHETIC ENHANCEMENT LAYER
-           Additive only — fits the high-altitude / aviation-HUD / CRT theme.
-           ==================================================================== */
-
-        /* Honour reduced-motion preferences across all added animation. */
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
-            .crt-line, .aerlock-grain, .aerlock-vignette { display: none !important; }
-        }
-
-        /* Film-grain / static overlay for the CRT feel. */
-        .aerlock-grain {
-            position: fixed;
-            inset: -50%;
-            z-index: 49;
-            pointer-events: none;
-            opacity: 0.035;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
-            animation: grainShift 0.4s steps(2) infinite;
-        }
-        @keyframes grainShift {
-            0% { transform: translate(0,0); }
-            50% { transform: translate(-3%, 2%); }
-            100% { transform: translate(2%, -3%); }
-        }
-
-        /* Soft vignette to focus the viewport like a cockpit display. */
-        .aerlock-vignette {
-            position: fixed;
-            inset: 0;
-            z-index: 48;
-            pointer-events: none;
-            background: radial-gradient(circle at center, transparent 55%, rgba(0,0,0,0.45) 100%);
-        }
-
-        /* Blinking terminal cursor used in the decrypt headline. */
-        .aerlock-caret {
-            display: inline-block;
-            width: 0.6ch;
-            margin-left: 2px;
-            background: theme('colors.primary-container');
-            box-shadow: 0 0 8px theme('colors.primary-container');
-            animation: caretBlink 1s steps(1) infinite;
-        }
-        @keyframes caretBlink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
-
-        /* Radar sweep inside the hero lock dial. */
-        .aerlock-radar {
-            position: absolute;
-            inset: 0;
-            border-radius: 9999px;
-            background: conic-gradient(from 0deg, transparent 0deg, rgba(0,240,255,0.35) 35deg, transparent 70deg);
-            animation: spin 4s linear infinite;
-            pointer-events: none;
-            mix-blend-mode: screen;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Reticle ticks around the dial. */
-        .aerlock-tick {
-            position: absolute;
-            left: 50%;
-            top: 50%;
-            width: 1px;
-            height: 6px;
-            background: rgba(0,240,255,0.4);
-            transform-origin: 0 130px;
-        }
-
-        /* Gentle flicker on the primary glow accents. */
-        .aerlock-flicker { animation: flicker 6s infinite; }
-        @keyframes flicker {
-            0%, 96%, 100% { opacity: 1; }
-            97% { opacity: 0.6; }
-            98% { opacity: 1; }
-            99% { opacity: 0.75; }
-        }
-
-        /* Reveal-on-scroll for sections. */
-        .aerlock-reveal {
-            opacity: 0;
-            transform: translateY(24px);
-            transition: opacity 0.7s cubic-bezier(0.16,1,0.3,1), transform 0.7s cubic-bezier(0.16,1,0.3,1);
-        }
-        .aerlock-reveal.is-visible { opacity: 1; transform: none; }
-
-        /* Animated underline sweep on links. */
-        .aerlock-sweep { position: relative; }
-        .aerlock-sweep::after {
-            content: "";
-            position: absolute;
-            left: 0; bottom: -2px;
-            width: 100%; height: 1px;
-            background: theme('colors.primary-container');
-            transform: scaleX(0);
-            transform-origin: left;
-            transition: transform 0.3s ease;
-        }
-        .aerlock-sweep:hover::after { transform: scaleX(1); }
-
-        /* Boot overlay shown once on first paint. */
-        #aerlock-boot {
-            position: fixed;
-            inset: 0;
-            z-index: 100;
-            background: theme('colors.surface-container-lowest');
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: opacity 0.6s ease, visibility 0.6s ease;
-        }
-        #aerlock-boot.done { opacity: 0; visibility: hidden; }
-
-        /* Scanning bar inside diagnostic cards on hover. */
-        .aerlock-scanbar { position: relative; overflow: hidden; }
-        .aerlock-scanbar::before {
-            content: "";
-            position: absolute;
-            left: -100%; top: 0;
-            width: 100%; height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(0,240,255,0.08), transparent);
-            transition: left 0.6s ease;
-        }
-        .aerlock-scanbar:hover::before { left: 100%; }
-
-        ::-webkit-scrollbar { width: 10px; height: 10px; }
-        ::-webkit-scrollbar-track { background: theme('colors.surface-container-lowest'); }
-        ::-webkit-scrollbar-thumb { background: theme('colors.outline-variant'); border: 2px solid theme('colors.surface-container-lowest'); }
-        ::-webkit-scrollbar-thumb:hover { background: theme('colors.primary-container'); }
-    </style>
+<!-- Compiled Tailwind + AERLOCK styles (self-hosted, replaces the Play CDN) -->
+<link rel="stylesheet" href="dist/aerlock.css"/>
+<!-- Boot overlay is progressive enhancement: engage only if JS runs, and
+     always guarantee dismissal even if the main bundle fails to load. -->
+<script>
+  (function () {
+    document.documentElement.classList.remove("no-js");
+    window.addEventListener("load", function () {
+      setTimeout(function () {
+        var b = document.getElementById("aerlock-boot");
+        if (b) b.classList.add("done");
+      }, 4000);
+    });
+  })();
+</script>
 </head>
 <body class="min-h-screen flex flex-col relative overflow-x-hidden selection:bg-primary-container selection:text-on-primary-container">
+<a href="#main" class="aerlock-skip aerlock-visually-hidden">Skip to main content</a>
 <!-- Boot sequence overlay (added) -->
 <div id="aerlock-boot">
 <div class="flex flex-col gap-3 font-tech-data text-label-md text-primary w-[320px] max-w-[80vw]">
-<div class="flex items-center gap-2"><span class="material-symbols-outlined text-primary-container">lock</span><span class="tracking-widest">AERLOCK</span></div>
+<div class="flex items-center gap-2"><span aria-hidden="true" class="material-symbols-outlined text-primary-container">lock</span><span class="tracking-widest">AERLOCK</span></div>
 <div id="aerlock-boot-log" class="text-on-surface-variant text-label-sm leading-relaxed min-h-[72px]"></div>
 <div class="aerlock-recessed h-2 w-full"><div id="aerlock-boot-bar" class="h-full bg-primary-container aerlock-glow" style="width:0%"></div></div>
 <div class="text-on-surface-variant text-label-sm uppercase tracking-widest">Establishing encrypted link…</div>
@@ -331,18 +83,32 @@
 <header class="fixed top-0 w-full z-50 border-b border-white/10 bg-surface/95 backdrop-blur-sm shadow-[0_0_12px_rgba(0,219,233,0.05)] h-16">
 <div class="flex justify-between items-center w-full px-margin max-w-container-max mx-auto h-full">
 <div class="font-headline-sm text-headline-sm font-bold tracking-widest text-primary dark:text-primary-fixed aerlock-flicker">AERLOCK</div>
-<nav class="hidden md:flex gap-6">
-<a class="text-primary font-bold border-b border-primary py-4 font-label-md text-label-md" href="#">ALT: 42,000FT</a>
-<a class="text-on-surface-variant font-label-md text-label-md flex items-center gap-2 hover:text-primary transition-all duration-300 aerlock-sweep" href="#">PSI: 14.7</a>
-<a class="text-on-surface-variant font-label-md text-label-md flex items-center gap-2 hover:text-primary transition-all duration-300 aerlock-sweep" href="#">LINK: ENCRYPTED</a>
-<span id="aerlock-clock" class="text-primary-fixed-dim font-label-md text-label-md flex items-center gap-2 tabular-nums">--:--:-- UTC</span>
+<!-- Decorative telemetry readouts: not interactive, so rendered as spans. -->
+<nav aria-label="Status readouts" class="hidden md:flex gap-6 items-center">
+<span class="text-primary font-bold border-b border-primary py-4 font-label-md text-label-md">ALT: 42,000FT</span>
+<span class="text-on-surface-variant font-label-md text-label-md flex items-center gap-2">PSI: 14.7</span>
+<span class="text-on-surface-variant font-label-md text-label-md flex items-center gap-2">LINK: ENCRYPTED</span>
+<span data-clock id="aerlock-clock" class="text-primary-fixed-dim font-label-md text-label-md flex items-center gap-2 tabular-nums">--:--:-- UTC</span>
 </nav>
+<div class="flex items-center gap-2">
+<button id="aerlock-menu-btn" type="button" aria-expanded="false" aria-controls="aerlock-mobile-nav" aria-label="Open navigation menu" class="md:hidden text-primary p-2 aerlock-border hover:bg-surface-container-high transition-colors flex items-center">
+<span aria-hidden="true" class="material-symbols-outlined">menu</span>
+</button>
 <button data-track="nav_go_dark" class="bg-primary-container text-on-primary-container font-label-md text-label-md px-4 py-2 hover:bg-primary transition-colors active:scale-95 border border-transparent hover:border-primary">
                 GO DARK
             </button>
 </div>
+</div>
+<!-- Mobile navigation panel (revealed by the menu button on small screens). -->
+<div id="aerlock-mobile-nav" class="hidden md:hidden absolute top-16 left-0 right-0 bg-surface border-b border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.5)] flex-col px-margin py-4">
+<span class="text-primary font-bold font-label-md text-label-md py-2 block">ALT: 42,000FT</span>
+<span class="text-on-surface-variant font-label-md text-label-md py-2 block">PSI: 14.7</span>
+<span class="text-on-surface-variant font-label-md text-label-md py-2 block">LINK: ENCRYPTED</span>
+<span data-clock class="text-primary-fixed-dim font-label-md text-label-md py-2 block tabular-nums">--:--:-- UTC</span>
+<a href="analytics.html" class="text-primary font-label-md text-label-md py-2 block border-t border-white/10 mt-1 pt-3 hover:text-primary-container transition-colors">TELEMETRY CONSOLE →</a>
+</div>
 </header>
-<main class="flex-grow pt-24 pb-16 px-margin max-w-container-max mx-auto w-full flex flex-col gap-24">
+<main id="main" class="flex-grow pt-24 pb-16 px-margin max-w-container-max mx-auto w-full flex flex-col gap-24">
 <!-- Hero Section -->
 <section class="aerlock-border bg-surface-container relative overflow-hidden min-h-[600px] flex items-center p-8 md:p-16">
 <div class="absolute inset-0 opacity-20 pointer-events-none" style="background-image: url('data:image/svg+xml;utf8,&lt;svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22100%22&gt;&lt;rect width=%22100%22 height=%22100%22 fill=%22none%22 stroke=%22%23ffffff%22 stroke-width=%220.5%22 stroke-opacity=%220.2%22/&gt;&lt;/svg&gt;'); background-size: 50px 50px;"></div>
@@ -355,17 +121,19 @@
 <h1 class="font-headline-lg text-headline-lg text-primary"><span data-decrypt="TECHNICAL PRIVACY.">TECHNICAL PRIVACY.</span><br/><span class="text-on-surface" data-decrypt="ABSOLUTE ASSET INTEGRITY.">ABSOLUTE ASSET INTEGRITY.</span></h1>
 <p class="font-body-lg text-body-lg text-on-surface-variant max-w-xl">Aerlock provides high-fidelity structural privacy for your digital footprint. Our encrypted custody systems ensure zero data leakage for high-net-worth positions.</p>
 <div class="flex gap-4 mt-4">
-<button data-track="hero_enter_vault" class="bg-primary-container text-on-primary-container font-label-md text-label-md px-8 py-3 hover:bg-primary transition-colors border border-transparent hover:border-primary flex items-center gap-2"><span class="material-symbols-outlined">lock</span> ENTER VAULT</button>
-<button data-track="hero_system_logs" class="bg-transparent text-primary font-label-md text-label-md px-8 py-3 aerlock-border hover:bg-surface-container-high transition-colors flex items-center gap-2">
-<span class="material-symbols-outlined">description</span>
+<!-- ENTER VAULT = app entry point. Set window.AERLOCK_APP_URL to wire it to the
+     DApp; until then it gives non-blocking feedback instead of a dead click. -->
+<button id="aerlock-enter-vault" type="button" data-track="hero_enter_vault" class="bg-primary-container text-on-primary-container font-label-md text-label-md px-8 py-3 hover:bg-primary transition-colors border border-transparent hover:border-primary flex items-center gap-2"><span aria-hidden="true" class="material-symbols-outlined">lock</span> <span data-vault-label>ENTER VAULT</span></button>
+<a href="analytics.html" data-track="hero_system_logs" class="bg-transparent text-primary font-label-md text-label-md px-8 py-3 aerlock-border hover:bg-surface-container-high transition-colors flex items-center gap-2">
+<span aria-hidden="true" class="material-symbols-outlined">description</span>
                             SYSTEM LOGS
-                        </button>
+                        </a>
 </div>
 </div>
 <div class="relative h-full min-h-[400px] aerlock-recessed flex items-center justify-center">
 <!-- Technical Aviation Airlock Cross-section placeholder -->
 <div class="absolute inset-0 flex items-center justify-center opacity-30">
-<span class="material-symbols-outlined" style="font-size: 200px;">engineering</span>
+<span aria-hidden="true" class="material-symbols-outlined" style="font-size: 200px;">engineering</span>
 </div>
 <!-- HUD Elements -->
 <div class="absolute top-4 left-4 font-label-sm text-label-sm text-primary">X-COORD: <span id="hud-x">45.92</span><br/>Y-COORD: <span id="hud-y">12.04</span></div>
@@ -374,7 +142,7 @@
 <div class="aerlock-radar"></div>
 <div class="w-48 h-48 border border-primary/40 rounded-full flex items-center justify-center animate-[spin_10s_linear_infinite]"></div>
 <div class="w-32 h-32 border border-primary/60 rounded-full flex items-center justify-center absolute"></div>
-<span class="material-symbols-outlined text-primary text-6xl relative z-10 aerlock-flicker">lock_outline</span>
+<span aria-hidden="true" class="material-symbols-outlined text-primary text-6xl relative z-10 aerlock-flicker">lock_outline</span>
 </div>
 </div>
 </div>
@@ -391,7 +159,7 @@
 <div class="aerlock-border bg-surface-container p-8 flex flex-col gap-6 aerlock-solid-shadow hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
 <div class="flex justify-between items-start border-b border-outline-variant pb-4">
 <span class="font-headline-sm text-headline-sm text-primary">01</span>
-<span class="material-symbols-outlined text-primary">shield_locked</span>
+<span aria-hidden="true" class="material-symbols-outlined text-primary">shield_locked</span>
 </div>
 <h3 class="font-headline-sm text-headline-sm text-on-surface uppercase">Pressurize</h3>
 <div class="font-label-sm text-primary tracking-wider uppercase mb-2">Operation: Shield</div>
@@ -401,7 +169,7 @@
 <div class="aerlock-border bg-surface-container p-8 flex flex-col gap-6 aerlock-solid-shadow hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
 <div class="flex justify-between items-start border-b border-outline-variant pb-4">
 <span class="font-headline-sm text-headline-sm text-primary">02</span>
-<span class="material-symbols-outlined text-primary">blur_on</span>
+<span aria-hidden="true" class="material-symbols-outlined text-primary">blur_on</span>
 </div>
 <h3 class="font-headline-sm text-headline-sm text-on-surface uppercase">Encapsulate</h3>
 <div class="font-label-sm text-primary tracking-wider uppercase mb-2">Operation: Obfuscate</div>
@@ -411,7 +179,7 @@
 <div class="aerlock-border bg-surface-container p-8 flex flex-col gap-6 aerlock-solid-shadow hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all">
 <div class="flex justify-between items-start border-b border-outline-variant pb-4">
 <span class="font-headline-sm text-headline-sm text-primary">03</span>
-<span class="material-symbols-outlined text-primary">flight_takeoff</span>
+<span aria-hidden="true" class="material-symbols-outlined text-primary">flight_takeoff</span>
 </div>
 <h3 class="font-headline-sm text-headline-sm text-on-surface uppercase">Release</h3>
 <div class="font-label-sm text-primary tracking-wider uppercase mb-2">Operation: Unshield</div>
@@ -459,25 +227,25 @@
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
 <div class="aerlock-border bg-surface p-6 flex flex-col gap-4 border-l-4 border-l-primary-container aerlock-scanbar">
 <div class="font-headline-sm text-primary">η</div>
-<div class="font-label-sm text-on-surface uppercase tracking-widest border-b border-white/10 pb-2">Entropy Check</div>
+<h3 class="font-label-sm text-on-surface uppercase tracking-widest border-b border-white/10 pb-2">Entropy Check</h3>
 <p class="font-body-md text-on-surface-variant text-sm">Ensuring sufficient random inputs to maintain cryptographic obscurity.</p>
 <div class="mt-auto font-label-sm text-primary flex items-center gap-2"><span class="w-1.5 h-1.5 bg-primary-container inline-block animate-pulse"></span>STATUS: PASS</div>
 </div>
 <div class="aerlock-border bg-surface p-6 flex flex-col gap-4 border-l-4 border-l-primary-container aerlock-scanbar">
 <div class="font-headline-sm text-primary">θ</div>
-<div class="font-label-sm text-on-surface uppercase tracking-widest border-b border-white/10 pb-2">Nullifier Integrity</div>
+<h3 class="font-label-sm text-on-surface uppercase tracking-widest border-b border-white/10 pb-2">Nullifier Integrity</h3>
 <p class="font-body-md text-on-surface-variant text-sm">Preventing double-spend attacks within the obscured vault state.</p>
 <div class="mt-auto font-label-sm text-primary flex items-center gap-2"><span class="w-1.5 h-1.5 bg-primary-container inline-block animate-pulse"></span>STATUS: PASS</div>
 </div>
 <div class="aerlock-border bg-surface p-6 flex flex-col gap-4 border-l-4 border-l-primary-container aerlock-scanbar">
 <div class="font-headline-sm text-primary">ι</div>
-<div class="font-label-sm text-on-surface uppercase tracking-widest border-b border-white/10 pb-2">Injective Mapping</div>
+<h3 class="font-label-sm text-on-surface uppercase tracking-widest border-b border-white/10 pb-2">Injective Mapping</h3>
 <p class="font-body-md text-on-surface-variant text-sm">Validating 1:1 state transitions without metadata leakage.</p>
 <div class="mt-auto font-label-sm text-primary flex items-center gap-2"><span class="w-1.5 h-1.5 bg-primary-container inline-block animate-pulse"></span>STATUS: PASS</div>
 </div>
 <div class="aerlock-border bg-surface p-6 flex flex-col gap-4 border-l-4 border-l-primary-container aerlock-scanbar">
 <div class="font-headline-sm text-primary">κ</div>
-<div class="font-label-sm text-on-surface uppercase tracking-widest border-b border-white/10 pb-2">Proof Validity</div>
+<h3 class="font-label-sm text-on-surface uppercase tracking-widest border-b border-white/10 pb-2">Proof Validity</h3>
 <p class="font-body-md text-on-surface-variant text-sm">ZK-SNARK verifications complete before any state alteration.</p>
 <div class="mt-auto font-label-sm text-primary flex items-center gap-2"><span class="w-1.5 h-1.5 bg-primary-container inline-block animate-pulse"></span>STATUS: PASS</div>
 </div>
@@ -491,26 +259,27 @@
 </div>
 <div class="aerlock-border bg-surface-container overflow-x-auto">
 <table class="w-full text-left border-collapse">
+<caption class="aerlock-visually-hidden">Security comparison between exposed public wallets and Aerlock vaults.</caption>
 <thead>
 <tr class="border-b border-outline-variant bg-surface-container-high">
-<th class="p-6 font-label-sm text-on-surface-variant uppercase tracking-widest w-1/3">Parameter</th>
-<th class="p-6 font-label-sm text-error uppercase tracking-widest w-1/3 border-l border-outline-variant">Exposed Public Wallets</th>
-<th class="p-6 font-label-sm text-primary-container uppercase tracking-widest w-1/3 border-l border-outline-variant">Aerlock Vaults</th>
+<th scope="col" class="p-6 font-label-sm text-on-surface-variant uppercase tracking-widest w-1/3">Parameter</th>
+<th scope="col" class="p-6 font-label-sm text-error uppercase tracking-widest w-1/3 border-l border-outline-variant">Exposed Public Wallets</th>
+<th scope="col" class="p-6 font-label-sm text-primary-container uppercase tracking-widest w-1/3 border-l border-outline-variant">Aerlock Vaults</th>
 </tr>
 </thead>
 <tbody>
 <tr class="border-b border-outline-variant hover:bg-surface-container-high transition-colors">
-<td class="p-6 font-body-md text-on-surface">Traceability</td>
+<th scope="row" class="p-6 font-body-md text-on-surface font-normal">Traceability</th>
 <td class="p-6 font-tech-data text-error border-l border-outline-variant text-sm">DETERMINISTIC</td>
 <td class="p-6 font-tech-data text-primary-container border-l border-outline-variant text-sm">ZERO-KNOWLEDGE</td>
 </tr>
 <tr class="border-b border-outline-variant hover:bg-surface-container-high transition-colors">
-<td class="p-6 font-body-md text-on-surface">MEV Protection</td>
+<th scope="row" class="p-6 font-body-md text-on-surface font-normal">MEV Protection</th>
 <td class="p-6 font-tech-data text-error border-l border-outline-variant text-sm">VULNERABLE</td>
 <td class="p-6 font-tech-data text-primary-container border-l border-outline-variant text-sm">ISOLATED</td>
 </tr>
 <tr class="hover:bg-surface-container-high transition-colors">
-<td class="p-6 font-body-md text-on-surface">Identity Risk</td>
+<th scope="row" class="p-6 font-body-md text-on-surface font-normal">Identity Risk</th>
 <td class="p-6 font-tech-data text-error border-l border-outline-variant text-sm">CRITICAL EXPOSURE</td>
 <td class="p-6 font-tech-data text-primary-container border-l border-outline-variant text-sm">SEALED</td>
 </tr>
@@ -558,12 +327,12 @@
             </div>
 </div>
 <div class="flex flex-col md:flex-row gap-6 md:gap-8 items-start md:items-center">
-<a class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest hover:text-primary transition-colors flex items-center gap-2" href="#"><span class="w-1.5 h-1.5 bg-outline-variant inline-block hover:bg-primary transition-colors"></span> DIAGNOSTICS</a>
-<a class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest hover:text-primary transition-colors flex items-center gap-2" href="#"><span class="w-1.5 h-1.5 bg-outline-variant inline-block hover:bg-primary transition-colors"></span> SYSTEM LOGS</a>
-<a class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest hover:text-primary transition-colors flex items-center gap-2" href="#"><span class="w-1.5 h-1.5 bg-outline-variant inline-block hover:bg-primary transition-colors"></span> INTEGRITY REPORT</a>
+<a class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest hover:text-primary transition-colors flex items-center gap-2" href="analytics.html"><span class="w-1.5 h-1.5 bg-outline-variant inline-block hover:bg-primary transition-colors"></span> DIAGNOSTICS</a>
+<a class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest hover:text-primary transition-colors flex items-center gap-2" href="analytics.html"><span class="w-1.5 h-1.5 bg-outline-variant inline-block hover:bg-primary transition-colors"></span> SYSTEM LOGS</a>
+<a class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest hover:text-primary transition-colors flex items-center gap-2" href="analytics.html"><span class="w-1.5 h-1.5 bg-outline-variant inline-block hover:bg-primary transition-colors"></span> INTEGRITY REPORT</a>
 </div>
 <div class="font-label-sm text-label-sm text-on-surface-variant text-right">
-                © 2024 AERLOCK SYSTEMS.<br/>JURISDICTION: LEO-ORBIT.
+                © 2024–2026 AERLOCK SYSTEMS.<br/>JURISDICTION: LEO-ORBIT.
             </div>
 </div>
 </footer>

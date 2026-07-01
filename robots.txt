@@ -1,5 +1,8 @@
 User-agent: *
 Allow: /
-Disallow: /analytics.html
+
+# The Telemetry Console is kept out of the index via its own <meta name="robots" content="noindex">.
+# It is intentionally NOT Disallow'd here — a Disallow would stop crawlers from
+# reading that noindex directive at all.
 
 Sitemap: https://aerlock.io/sitemap.xml
