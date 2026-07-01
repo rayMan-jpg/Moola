@@ -1,0 +1,4 @@
+node_modules/
+scratchpad_capture.mjs
+*.log
+.DS_Store

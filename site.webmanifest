@@ -1,0 +1,14 @@
+{
+  "name": "AERLOCK",
+  "short_name": "AERLOCK",
+  "description": "High-Altitude Security Protocol — technical privacy and absolute asset integrity.",
+  "theme_color": "#0c1324",
+  "background_color": "#0c1324",
+  "display": "standalone",
+  "start_url": "/",
+  "icons": [
+    { "src": "favicon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "favicon-512.png", "type": "image/png", "sizes": "512x512" },
+    { "src": "favicon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" }
+  ]
+}

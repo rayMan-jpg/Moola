@@ -1,0 +1,221 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   AERLOCK custom layer — ported from the original inline <style> blocks.
+   Compiled by Tailwind so every theme() token resolves to a literal value.
+   ========================================================================== */
+
+body {
+    background-color: theme('colors.background');
+    color: theme('colors.on-background');
+    background-image: linear-gradient(theme('colors.surface-container-highest') 1px, transparent 1px),
+                      linear-gradient(90deg, theme('colors.surface-container-highest') 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: center top;
+}
+
+.aerlock-glow { box-shadow: 0 0 8px theme('colors.primary-fixed-dim'); }
+.aerlock-border { border: 1px solid rgba(255, 255, 255, 0.1); }
+
+.aerlock-recessed {
+    background: rgba(0, 0, 0, 0.2);
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
+    border: 1px solid theme('colors.outline-variant');
+}
+
+.aerlock-solid-shadow { box-shadow: 4px 4px 0 theme('colors.primary-container'); }
+.aerlock-solid-shadow-sm { box-shadow: 2px 2px 0 theme('colors.outline-variant'); }
+
+.crt-line {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: rgba(0, 240, 255, 0.2);
+    animation: scan 8s linear infinite;
+    z-index: 50;
+    pointer-events: none;
+}
+@keyframes scan { 0% { transform: translateY(0); } 100% { transform: translateY(100vh); } }
+
+.material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+.material-symbols-outlined.filled { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+
+/* ====================================================================
+   AESTHETIC ENHANCEMENT LAYER
+   Additive only — fits the high-altitude / aviation-HUD / CRT theme.
+   ==================================================================== */
+
+/* Honour reduced-motion preferences across all added animation. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
+    .crt-line, .aerlock-grain, .aerlock-vignette { display: none !important; }
+}
+
+/* Decorative animations pause when the tab/section isn't visible (perf/battery).
+   Applied via [data-anim-paused] toggled by js; invisible while the page is in view. */
+[data-anim-paused] .crt-line,
+[data-anim-paused] .aerlock-grain,
+[data-anim-paused] .aerlock-radar,
+[data-anim-paused] .aerlock-flicker,
+[data-anim-paused] .animate-pulse,
+[data-anim-paused] .animate-\[spin_10s_linear_infinite\] { animation-play-state: paused !important; }
+
+/* Film-grain / static overlay for the CRT feel. */
+.aerlock-grain {
+    position: fixed;
+    inset: -50%;
+    z-index: 49;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+    animation: grainShift 0.4s steps(2) infinite;
+}
+@keyframes grainShift {
+    0% { transform: translate(0,0); }
+    50% { transform: translate(-3%, 2%); }
+    100% { transform: translate(2%, -3%); }
+}
+
+/* Soft vignette to focus the viewport like a cockpit display. */
+.aerlock-vignette {
+    position: fixed;
+    inset: 0;
+    z-index: 48;
+    pointer-events: none;
+    background: radial-gradient(circle at center, transparent 55%, rgba(0,0,0,0.45) 100%);
+}
+
+/* Blinking terminal cursor used in the decrypt headline. */
+.aerlock-caret {
+    display: inline-block;
+    width: 0.6ch;
+    margin-left: 2px;
+    background: theme('colors.primary-container');
+    box-shadow: 0 0 8px theme('colors.primary-container');
+    animation: caretBlink 1s steps(1) infinite;
+}
+@keyframes caretBlink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+
+/* Radar sweep inside the hero lock dial. */
+.aerlock-radar {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: conic-gradient(from 0deg, transparent 0deg, rgba(0,240,255,0.35) 35deg, transparent 70deg);
+    animation: spin 4s linear infinite;
+    pointer-events: none;
+    mix-blend-mode: screen;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Reticle ticks around the dial. */
+.aerlock-tick {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 1px;
+    height: 6px;
+    background: rgba(0,240,255,0.4);
+    transform-origin: 0 130px;
+}
+
+/* Gentle flicker on the primary glow accents. */
+.aerlock-flicker { animation: flicker 6s infinite; }
+@keyframes flicker {
+    0%, 96%, 100% { opacity: 1; }
+    97% { opacity: 0.6; }
+    98% { opacity: 1; }
+    99% { opacity: 0.75; }
+}
+
+/* Reveal-on-scroll for sections. Gated on the `aerlock-anim` class that
+   aerlock.js adds at startup — so if the script fails to load, sections stay
+   fully visible instead of being hidden forever. */
+.aerlock-reveal {
+    transition: opacity 0.7s cubic-bezier(0.16,1,0.3,1), transform 0.7s cubic-bezier(0.16,1,0.3,1);
+}
+html.aerlock-anim .aerlock-reveal { opacity: 0; transform: translateY(24px); }
+html.aerlock-anim .aerlock-reveal.is-visible { opacity: 1; transform: none; }
+
+/* Animated underline sweep on links. */
+.aerlock-sweep { position: relative; }
+.aerlock-sweep::after {
+    content: "";
+    position: absolute;
+    left: 0; bottom: -2px;
+    width: 100%; height: 1px;
+    background: theme('colors.primary-container');
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.3s ease;
+}
+.aerlock-sweep:hover::after { transform: scaleX(1); }
+
+/* Boot overlay shown once on first paint. */
+#aerlock-boot {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: theme('colors.surface-container-lowest');
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.6s ease, visibility 0.6s ease;
+}
+#aerlock-boot.done { opacity: 0; visibility: hidden; }
+/* No-JS / failure fallback: never trap content behind the overlay. */
+.no-js #aerlock-boot { display: none; }
+
+/* Scanning bar inside diagnostic cards on hover. */
+.aerlock-scanbar { position: relative; overflow: hidden; }
+.aerlock-scanbar::before {
+    content: "";
+    position: absolute;
+    left: -100%; top: 0;
+    width: 100%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(0,240,255,0.08), transparent);
+    transition: left 0.6s ease;
+}
+.aerlock-scanbar:hover::before { left: 100%; }
+
+/* Keyboard focus indicator (accessibility). Only shows on keyboard focus. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+    outline: 2px solid theme('colors.primary-container');
+    outline-offset: 2px;
+}
+
+/* Visually-hidden utility for skip links / SR-only text. */
+.aerlock-visually-hidden {
+    position: absolute !important;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+/* Skip link becomes visible when focused. */
+.aerlock-skip:focus {
+    position: fixed;
+    top: 8px; left: 8px;
+    width: auto; height: auto;
+    clip: auto;
+    z-index: 200;
+    padding: 8px 16px;
+    background: theme('colors.primary-container');
+    color: theme('colors.on-primary-container');
+    font-family: theme('fontFamily.label-md');
+}
+
+/* Progress-bar fill transition (telemetry console). */
+.bar-fill { transition: width 0.8s cubic-bezier(0.16,1,0.3,1); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: theme('colors.surface-container-lowest'); }
+::-webkit-scrollbar-thumb { background: theme('colors.outline-variant'); border: 2px solid theme('colors.surface-container-lowest'); }
+::-webkit-scrollbar-thumb:hover { background: theme('colors.primary-container'); }
