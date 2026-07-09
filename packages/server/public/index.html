@@ -1,0 +1,98 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moola — Dashboard</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+
+<nav>
+  <a class="brand" href="/">MOOLA<span class="cursor"></span></a>
+  <a class="link active" href="/">Dashboard</a>
+  <a class="link" href="/upload.html">Upload ad</a>
+</nav>
+
+<div class="wrap">
+  <h1>Ad network overview</h1>
+  <p class="sub">Live numbers from your local Moola exchange. Refreshes every 5 seconds.</p>
+
+  <div class="kpis" id="kpis"></div>
+
+  <h2>Ads</h2>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Ad</th><th>Advertiser</th><th>Keywords</th><th>Status</th>
+          <th class="num">Bid CPM</th><th class="num">Impressions</th>
+          <th class="num">Clicks</th><th class="num">CTR</th><th class="num">Spend</th>
+        </tr>
+      </thead>
+      <tbody id="ads"></tbody>
+    </table>
+  </div>
+
+  <h2>Advertiser balances</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Advertiser</th><th class="num">Balance</th></tr></thead>
+      <tbody id="advertisers"></tbody>
+    </table>
+  </div>
+
+  <h2>Publisher earnings (50% revenue share)</h2>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Publisher</th><th class="num">Impressions served</th><th class="num">Earnings</th></tr></thead>
+      <tbody id="publishers"></tbody>
+    </table>
+  </div>
+</div>
+
+<script type="module">
+  const usd = (n) => '$' + Number(n).toFixed(4).replace(/0{1,2}$/, (m) => (Number(n) === 0 ? '00'.slice(0, m.length) : m));
+  const money = (n) => '$' + Number(n).toFixed(4);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  async function refresh() {
+    const [summary, ads] = await Promise.all([
+      fetch('/api/stats/summary').then((r) => r.json()),
+      fetch('/api/ads').then((r) => r.json()),
+    ]);
+
+    document.getElementById('kpis').innerHTML = `
+      <div class="kpi"><div class="label">Impressions</div><div class="value">${summary.impressions}</div></div>
+      <div class="kpi"><div class="label">Clicks</div><div class="value">${summary.clicks}</div></div>
+      <div class="kpi"><div class="label">Advertiser spend</div><div class="value money out">${money(summary.totalSpendUsd)}</div></div>
+      <div class="kpi"><div class="label">Publisher earnings</div><div class="value money">${money(summary.publisherEarningsUsd)}</div></div>
+      <div class="kpi"><div class="label">Platform revenue</div><div class="value money">${money(summary.platformRevenueUsd)}</div></div>`;
+
+    document.getElementById('ads').innerHTML = ads.length
+      ? ads
+          .map((a) => {
+            const ctr = a.impressions ? ((100 * a.clicks) / a.impressions).toFixed(1) + '%' : '—';
+            return `<tr>
+              <td><a href="/preview.html?id=${encodeURIComponent(a.id)}">${esc(a.title)}</a></td>
+              <td>${esc(a.advertiser_name)}</td>
+              <td>${esc(a.keywords)}</td>
+              <td><span class="badge ${a.status}">${a.status}</span></td>
+              <td class="num">$${a.bid_cpm_usd.toFixed(2)}</td>
+              <td class="num">${a.impressions}</td>
+              <td class="num">${a.clicks}</td>
+              <td class="num">${ctr}</td>
+              <td class="num">${money(a.spend_usd)}</td>
+            </tr>`;
+          })
+          .join('')
+      : '<tr><td colspan="9" class="empty">No ads yet — <a href="/upload.html">upload the first one</a> or run <code>npm run seed</code>.</td></tr>';
+
+    document.getElementById('advertisers').innerHTML = summary.advertisers
+      .map((a) => `<tr><td>${esc(a.name)}</td><td class="num">$${a.balance_usd.toFixed(4)}</td></tr>`)
+      .join('');
+
+    document.getElementById('publishers').innerHTML = summary.publishers
+      .map((p) => `<tr><td>${esc(p.name)}</td><td class="num">${p.impressions}</td><td class="num">${money(p.earnings_usd)}</td></tr>`)
+      .join('');
+  }
+
+  refresh();
+  setInterval(refresh, 5000);
+</script>

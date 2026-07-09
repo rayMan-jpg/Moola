@@ -1,0 +1,73 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moola — Upload ad</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+
+<nav>
+  <a class="brand" href="/">MOOLA<span class="cursor"></span></a>
+  <a class="link" href="/">Dashboard</a>
+  <a class="link active" href="/upload.html">Upload ad</a>
+</nav>
+
+<div class="wrap">
+  <h1>Upload a video ad</h1>
+  <p class="sub">Upload a normal MP4 — Moola converts it to terminal video automatically (first 10 seconds, 12 fps).</p>
+
+  <div class="error" id="error" role="alert"></div>
+
+  <form class="card" id="form">
+    <div class="field">
+      <label for="advertiserName">Advertiser name</label>
+      <input id="advertiserName" name="advertiserName" required placeholder="Acme Cloud Inc">
+      <div class="hint">New advertisers start with a $100 demo balance.</div>
+    </div>
+    <div class="field">
+      <label for="title">Ad title</label>
+      <input id="title" name="title" required placeholder="Acme Cloud — deploy faster">
+    </div>
+    <div class="field">
+      <label for="keywords">Target keywords (comma-separated)</label>
+      <input id="keywords" name="keywords" required placeholder="aws, cloud, deploy">
+      <div class="hint">Your ad is eligible when a CLI's current context matches any of these.</div>
+    </div>
+    <div class="field">
+      <label for="bidCpmUsd">Bid — dollars per 1000 impressions (CPM)</label>
+      <input id="bidCpmUsd" name="bidCpmUsd" required type="number" min="0.01" step="0.01" placeholder="5.00">
+      <div class="hint">Highest matching bid wins the slot.</div>
+    </div>
+    <div class="field">
+      <label for="destinationUrl">Destination URL (where clicks go)</label>
+      <input id="destinationUrl" name="destinationUrl" required type="url" placeholder="https://example.com/landing">
+    </div>
+    <div class="field">
+      <label for="video">Video file (MP4)</label>
+      <input id="video" name="video" required type="file" accept="video/mp4,video/*">
+    </div>
+    <button class="primary" type="submit" id="submit">Upload &amp; transcode</button>
+  </form>
+</div>
+
+<script type="module">
+  const form = document.getElementById('form');
+  const button = document.getElementById('submit');
+  const errorBox = document.getElementById('error');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorBox.style.display = 'none';
+    button.disabled = true;
+    button.textContent = 'Uploading…';
+    try {
+      const res = await fetch('/api/ads', { method: 'POST', body: new FormData(form) });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || `upload failed (${res.status})`);
+      location.href = `/preview.html?id=${encodeURIComponent(body.id)}`;
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.style.display = 'block';
+      button.disabled = false;
+      button.textContent = 'Upload & transcode';
+    }
+  });
+</script>

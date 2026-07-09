@@ -1,0 +1,79 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moola — Ad preview</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+
+<nav>
+  <a class="brand" href="/">MOOLA<span class="cursor"></span></a>
+  <a class="link" href="/">Dashboard</a>
+  <a class="link" href="/upload.html">Upload ad</a>
+</nav>
+
+<div class="wrap">
+  <h1 id="title">Ad preview</h1>
+  <p class="sub" id="status">Loading…</p>
+
+  <div class="player">
+    <div class="titlebar" id="titlebar">— terminal preview (80 columns) —</div>
+    <pre id="screen" aria-label="Animated terminal preview of the ad"></pre>
+  </div>
+
+  <h2>Campaign</h2>
+  <dl class="meta" id="meta"></dl>
+
+  <h2>Performance</h2>
+  <div class="kpis" id="kpis"></div>
+</div>
+
+<script type="module">
+  import { playInPre } from '/ansi-to-html.js';
+
+  const id = new URLSearchParams(location.search).get('id');
+  const money = (n) => '$' + Number(n).toFixed(4);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let playing = false;
+
+  async function tick() {
+    const res = await fetch(`/api/ads/${encodeURIComponent(id)}`);
+    if (!res.ok) {
+      document.getElementById('status').textContent = 'Ad not found.';
+      return;
+    }
+    const ad = await res.json();
+    document.getElementById('title').textContent = ad.title;
+    document.getElementById('meta').innerHTML = `
+      <dt>Advertiser</dt><dd>${esc(ad.advertiser_name)} (balance $${ad.advertiser_balance_usd.toFixed(4)})</dd>
+      <dt>Keywords</dt><dd>${esc(ad.keywords)}</dd>
+      <dt>Bid</dt><dd>$${ad.bid_cpm_usd.toFixed(2)} CPM</dd>
+      <dt>Destination</dt><dd><a href="${esc(ad.destination_url)}" rel="noopener">${esc(ad.destination_url)}</a></dd>`;
+    const ctr = ad.impressions ? ((100 * ad.clicks) / ad.impressions).toFixed(1) + '%' : '—';
+    document.getElementById('kpis').innerHTML = `
+      <div class="kpi"><div class="label">Impressions</div><div class="value">${ad.impressions}</div></div>
+      <div class="kpi"><div class="label">Clicks</div><div class="value">${ad.clicks}</div></div>
+      <div class="kpi"><div class="label">CTR</div><div class="value">${ctr}</div></div>
+      <div class="kpi"><div class="label">Spend</div><div class="value money out">${money(ad.spend_usd)}</div></div>`;
+
+    if (ad.status === 'failed') {
+      document.getElementById('status').textContent = `Transcoding failed: ${ad.error ?? 'unknown error'}`;
+      return;
+    }
+    if (ad.status === 'processing') {
+      document.getElementById('status').textContent = 'Transcoding… this page refreshes automatically.';
+      setTimeout(tick, 2000);
+      return;
+    }
+
+    document.getElementById('status').textContent = 'Ready. This is exactly what plays inside a terminal.';
+    if (!playing) {
+      playing = true;
+      const asset = await fetch(`/api/ads/${encodeURIComponent(id)}/asset?cols=80`).then((r) => r.json());
+      document.getElementById('titlebar').textContent =
+        `— terminal preview (${asset.cols}×${asset.rows} chars, ${asset.fps} fps, ${(asset.durationMs / 1000).toFixed(1)}s, loops) —`;
+      playInPre(asset, document.getElementById('screen'));
+    }
+    setTimeout(tick, 5000); // keep stats fresh while previewing
+  }
+
+  tick();
+</script>
