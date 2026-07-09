@@ -1,0 +1,31 @@
+{
+  "name": "moola",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Moola — programmatic video ad network for terminal/CLI environments",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "doctor": "tsx scripts/doctor.ts",
+    "dev": "tsx packages/server/src/index.ts",
+    "seed": "tsx scripts/seed.ts",
+    "demo": "tsx demo/agent.ts",
+    "demo:video": "tsx demo/make-sample-videos.ts",
+    "transcode": "tsx packages/transcoder/src/cli.ts",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/express": "^5.0.0",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

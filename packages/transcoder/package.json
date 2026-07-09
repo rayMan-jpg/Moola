@@ -1,0 +1,20 @@
+{
+  "name": "@moola/transcoder",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "moola-transcode": "bin/moola-transcode.js"
+  },
+  "dependencies": {
+    "@moola/shared": "*"
+  },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0"
+  }
+}

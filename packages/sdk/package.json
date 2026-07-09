@@ -1,0 +1,14 @@
+{
+  "name": "moola-sdk",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Play sponsored terminal-video ads during your CLI's wait states",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@moola/shared": "*"
+  }
+}
