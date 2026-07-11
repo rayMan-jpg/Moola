@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "allium": {
+      "type": "http",
+      "url": "https://mcp.allium.so",
+      "headers": {
+        "X-API-KEY": "${ALLIUM_API_KEY}"
+      }
+    }
+  }
+}
