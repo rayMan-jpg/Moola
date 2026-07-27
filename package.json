@@ -1,0 +1,25 @@
+{
+  "name": "adhaan-cast",
+  "version": "0.1.0",
+  "description": "Self-hosted adhaan for Google Home / Nest Hub — computes prayer times from your settings and casts the adhaan to your devices automatically.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "adhan": "^4.4.3",
+    "bonjour-service": "^1.3.0",
+    "castv2-client": "^1.2.0",
+    "express": "^4.21.2",
+    "luxon": "^3.5.0",
+    "multer": "^2.0.2"
+  }
+}

@@ -1,0 +1,16 @@
+services:
+  adhaan-cast:
+    build: .
+    container_name: adhaan-cast
+    restart: unless-stopped
+    # Host networking is required: device discovery uses mDNS multicast, and the
+    # cast devices must be able to fetch the audio back from this container.
+    # (network_mode: host only works on Linux hosts, e.g. a Raspberry Pi —
+    # on Docker Desktop for Mac/Windows run the app natively instead.)
+    network_mode: host
+    environment:
+      - PORT=8090
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ./data:/app/data
+      - ./media:/app/media

@@ -1,0 +1,10 @@
+node_modules/
+npm-debug.log*
+
+# Runtime state (settings live here)
+data/*
+!data/.gitkeep
+
+# Adhaan audio is user-supplied; the sample chime is generated on first run
+media/*
+!media/.gitkeep
