@@ -121,11 +121,12 @@ complement is fully enumerated.
 
 ### Why 81% is the expected shape
 
-The concentration is explained by a single wallet outside both clusters:
+The concentration is explained by the **liquidity pool**, which sits outside both
+clusters (see the correction below - this address is the AMM, not a holder):
 
 | Rank | Address | Tokens | Share |
 |---|---|---|---|
-| 1 | `0x8366a39cc670b4001a1121b8f6a443a643e40951` | ~171.97M | 17.20% |
+| 1 | `0x8366a39cc670b4001a1121b8f6a443a643e40951` **(V4 PoolManager)** | ~171.97M | 17.20% |
 | 2 | `0x8f5f726e22d6aac6e04eebd35121fa49b4116067` | ~6.41M | 0.64% |
 | 3 | `0xcbdd38195130eea6b04af3a5cca56670a7c4c92a` | ~4.25M | 0.43% |
 | 4–65 | 62 further holders | ~3.35M | 0.34% |
@@ -149,3 +150,75 @@ Neither affects the numbers above, but both matter for re-running:
    snapshot is therefore only valid inside the retention window, so the script
    now probes retention and warns. Re-run it rather than reusing an old block
    number.
+
+---
+
+## CORRECTION: the 17.2% holder is the liquidity pool
+
+An earlier revision of this document described
+`0x8366a39cc670b4001a1121b8f6a443a643e40951` as a treasury/fee sink and
+concluded AZIA had no liquidity. **Both conclusions were wrong.** It is a
+**Uniswap V4-style singleton PoolManager**, and its AZIA balance is the AMM's
+token-side reserve.
+
+### Why the first pass missed it
+
+A V4 singleton holds every pool's tokens in one contract, keyed internally by
+pool id. It therefore exposes **no** `token0()`, `token1()`, `getReserves()`,
+`slot0()` or `factory()` — the V2/V3 pair probes all revert, which reads as
+"not a pool" if those are the only interfaces tested. Compounding it,
+arcexplorer.org's DEX indexer returns **0 matching pools** for AZIA out of
+21,785 indexed, and reports `priceUsd`, `liquidityUsd` and
+`pricingPoolAddress` as `null`. Two independent sources agreeing on "no
+market" were both simply blind to this venue.
+
+### What identifies it
+
+| Probe | Result |
+|---|---|
+| `extsload(bytes32)` slot 0 | returns `0xbca30b54…` (owner) — V4 PoolManager hallmark |
+| `protocolFeeController()` | resolves (zero) |
+| `protocolFeesAccrued(address)` | resolves (zero) |
+| `owner()` | `0xbca30b5429935205037069cf5b8a165f55d05a75` |
+| Balancer `getPoolTokens` / `getVault` | revert (not Balancer) |
+| Bytecode | 24,009 bytes; holds 46,322 distinct tokens; 0 outbound txs |
+
+### Reserve arithmetic closes
+
+At a market price of $0.0001366 (mcap $136.6K, supply 1.00B):
+
+```
+vault AZIA balance      171,969,865.50
+x price                 $23,491.08
+reported TVL / 2        $23,400.00      (venue shows Liquidity $46.8K)
+ratio                   1.0039          -> the vault's AZIA IS the pool reserve
+```
+
+### Consequence: the float, and the realizable ceiling
+
+The 18.60% "non-audited remainder" is 17.20% pool reserve plus a **1.40% real
+float** across 64 EOAs. Dumping that float into the pool
+(constant-product, 0.30% fee):
+
+| Scenario | Tokens | Mcap after | Change | Realized USD |
+|---|---|---|---|---|
+| Outside float only | 14,005,478 | $116,374 | −14.48% | $1,757 |
+| Float + 10% of the 226 | 95,407,944 | $56,349 | −58.59% | $8,334 |
+| Float + 25% of the 226 | 217,511,642 | $26,572 | −80.47% | $13,051 |
+| Float + 50% of the 226 | 421,017,806 | $11,468 | −91.57% | $16,599 |
+| Float + all 226 | 828,030,134 | $4,034 | −97.04% | $19,366 |
+
+The realized column converges on the pool's quote depth: **no sequence of
+sales can extract more than the ~$23.4K of USDC in the pool.** An 81.40%
+position marked at $111.2K has a realizable value near $19K. Market cap here
+is price x supply, not a redeemable quantity.
+
+Both figures are best cases. The model assumes full-range constant product; V4
+concentrated liquidity produces sharper impact once price leaves the active
+range, and the 17 pools fragment depth further.
+
+### Third-party confirmation of the audit
+
+The Chipper terminal independently reports **Holders 269** and **Holding
+81.4%** for this wallet set — matching this audit's 269 non-zero holders and
+81.40% exactly, from a separate data pipeline.
