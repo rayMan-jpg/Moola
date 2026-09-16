@@ -89,3 +89,63 @@ sweep costs 14 RPC requests.
 
 Inputs: `generated_wallets.txt` (200), `launchpad_ops_wallets.txt` (26).
 Outputs: `azia_generated_balances.csv`, `azia_ops_balances.csv`.
+
+## Verification of the 81.40% figure
+
+The headline was independently re-derived by two paths that share no code:
+
+| Path | Method | Generated 200 | Ops 26 | Combined |
+|---|---|---|---|---|
+| A | 226 plain single `eth_call`s — no Multicall3, no hand-rolled ABI codec | 80.942438% | 0.460028% | **81.402466%** |
+| B | arcexplorer.org holders API only — zero RPC involvement | 80.942438% | 0.460028% | **81.402466%** |
+
+Per-wallet disagreement between A and B: **0 of 226**.
+
+### Closure test (the decisive check)
+
+Double-counting and missed holders are the two ways a share-of-supply number
+goes wrong. Both are ruled out by closing the books against total supply:
+
+```
+input integrity : 200 unique + 26 unique, intersection EMPTY (no double counting)
+audited non-zero:  204 holders   814,024,656.56  =  81.402466%
+non-audited     :   65 holders   185,975,343.44  =  18.597534%
+                   ---------- -----------------    -----------
+total           :  269 holders 1,000,000,000.00  = 100.000000%
+closure delta   :  0 wei
+```
+
+269 non-zero holders is the complete holder set, and it sums to `totalSupply()`
+exactly. So the 81.40% is not an estimate over a partial holder list — the
+complement is fully enumerated.
+
+### Why 81% is the expected shape
+
+The concentration is explained by a single wallet outside both clusters:
+
+| Rank | Address | Tokens | Share |
+|---|---|---|---|
+| 1 | `0x8366a39cc670b4001a1121b8f6a443a643e40951` | ~171.97M | 17.20% |
+| 2 | `0x8f5f726e22d6aac6e04eebd35121fa49b4116067` | ~6.41M | 0.64% |
+| 3 | `0xcbdd38195130eea6b04af3a5cca56670a7c4c92a` | ~4.25M | 0.43% |
+| 4–65 | 62 further holders | ~3.35M | 0.34% |
+
+The 200 generated wallets average 4,047,121.88 tokens each; 200 × 4.047M =
+809.42M, which is the reported total. One ~17.2% treasury-shaped holder plus a
+long tail of 64 small holders accounts for the entire 18.60% remainder.
+
+## Two RPC limitations found while verifying
+
+Neither affects the numbers above, but both matter for re-running:
+
+1. **Per-element rate limiting.** `https://rpc.mainnet.arc.io` rejects
+   individual elements inside a JSON-RPC batch with `-32005 rate limit
+   exceeded` — a 25-element batch came back with 11 rejected. The Multicall3
+   path never hits this (5 requests for 226 wallets), but the batched fallback
+   did. `Rpc.batch()` and `Rpc.call()` now retry rate-limited elements with
+   backoff instead of dropping them.
+2. **No archive state.** State is pruned: `eth_call` at `block-30000` returns
+   `0x` while `block-2000` and `block-10000` still resolve. The pinned-block
+   snapshot is therefore only valid inside the retention window, so the script
+   now probes retention and warns. Re-run it rather than reusing an old block
+   number.

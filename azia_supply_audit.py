@@ -46,6 +46,7 @@ MULTICALL_CHUNK = 50      # calls per aggregate3
 BATCH_CHUNK = 25          # eth_calls per JSON-RPC batch (fallback)
 SLEEP_BETWEEN = 0.15      # polite rate limiting
 MAX_RETRIES = 5
+RETRYABLE_RPC_CODES = {-32005}   # "rate limit exceeded"
 
 # selectors
 SEL_BALANCE_OF = "70a08231"
@@ -154,23 +155,55 @@ class Rpc:
         raise RuntimeError(f"RPC failed after {MAX_RETRIES} attempts: {last}")
 
     def call(self, method: str, params: list):
-        res = self._post({"jsonrpc": "2.0", "id": self._next_id(),
-                          "method": method, "params": params})
-        if "error" in res:
-            raise RuntimeError(f"{method} -> {res['error']}")
-        return res["result"]
+        for attempt in range(MAX_RETRIES):
+            res = self._post({"jsonrpc": "2.0", "id": self._next_id(),
+                              "method": method, "params": params})
+            if "error" not in res:
+                return res["result"]
+            if res["error"].get("code") not in RETRYABLE_RPC_CODES:
+                raise RuntimeError(f"{method} -> {res['error']}")
+            wait = 0.5 * (attempt + 1)
+            log(f"    ~ {method} rate-limited; retrying in {wait:.1f}s")
+            time.sleep(wait)
+        raise RuntimeError(f"{method} -> rate-limited after {MAX_RETRIES} attempts")
 
     def batch(self, reqs: list[tuple[str, list]]):
-        payload = [{"jsonrpc": "2.0", "id": i, "method": m, "params": p}
-                   for i, (m, p) in enumerate(reqs)]
-        res = self._post(payload)
-        if isinstance(res, dict):
-            raise RuntimeError(f"batch rejected: {res.get('error')}")
-        by_id = {item["id"]: item for item in res}
-        out = []
-        for i in range(len(reqs)):
-            item = by_id.get(i, {})
-            out.append(None if "error" in item else item.get("result"))
+        """Batched call. Elements rejected for rate limiting are retried.
+
+        Public Arc endpoints rate-limit *per element* (JSON-RPC -32005), so a
+        batch can come back part-filled. Those elements are re-sent with
+        backoff rather than reported as missing.
+        """
+        out: list = [None] * len(reqs)
+        pending = list(range(len(reqs)))
+        for attempt in range(MAX_RETRIES):
+            payload = [{"jsonrpc": "2.0", "id": i,
+                        "method": reqs[i][0], "params": reqs[i][1]}
+                       for i in pending]
+            res = self._post(payload)
+            if isinstance(res, dict):
+                raise RuntimeError(f"batch rejected: {res.get('error')}")
+            by_id = {item["id"]: item for item in res}
+            retry = []
+            for i in pending:
+                item = by_id.get(i)
+                if item is None:
+                    retry.append(i)
+                elif "error" in item:
+                    if item["error"].get("code") in RETRYABLE_RPC_CODES:
+                        retry.append(i)
+                    else:
+                        log(f"    ! element {i}: {item['error']}")
+                else:
+                    out[i] = item["result"]
+            pending = retry
+            if not pending:
+                return out
+            wait = 0.5 * (attempt + 1)
+            log(f"    ~ {len(pending)} batch element(s) rate-limited; "
+                f"retrying in {wait:.1f}s")
+            time.sleep(wait)
+        log(f"    ! {len(pending)} element(s) unresolved after retries")
         return out
 
     def eth_call(self, to: str, data: str, block: str):
@@ -417,6 +450,15 @@ def main() -> int:
     block = int(rpc.call("eth_blockNumber", []), 16)
     block_hex = hex(block)
     log(f"  snapshot block = {block} ({block_hex})")
+
+    log("\n  probing state retention (public Arc nodes are not archive)")
+    for back in (2_000, 10_000, 30_000):
+        probe = rpc.eth_call(TOKEN, "0x" + SEL_TOTAL_SUPPLY, hex(max(1, block - back)))
+        if probe in ("0x", "0x0"):
+            log(f"  state at block-{back:,} already pruned -> snapshot must be "
+                f"read promptly; re-run rather than reusing a stale block")
+            break
+        log(f"  state at block-{back:,}: available")
 
     log("\n== 3. Verifying token contract on-chain ==")
     code = rpc.call("eth_getCode", [TOKEN, block_hex])
