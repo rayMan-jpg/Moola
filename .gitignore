@@ -1,0 +1,2 @@
+# Regenerable RPC receipt cache for the float tracker (can grow large)
+.azia_receipt_cache.json
