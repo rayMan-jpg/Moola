@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "kanban": {
+      "command": "python3",
+      "args": [".claude/kanban/kanban.py", "mcp"]
+    }
+  }
+}
