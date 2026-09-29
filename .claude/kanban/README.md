@@ -14,6 +14,19 @@ dependencies.
 | Gateway dispatcher | `kanban.py dispatch --loop` |
 | Workspaces `scratch` / `dir:` / `worktree` | same |
 
+## Install on macOS (one command)
+
+Needs Claude Code installed and logged in (`claude` works in Terminal).
+
+```bash
+# optional: export DEEPSEEK_API_KEY=sk-...   (adds a "deepseek" worker profile)
+curl -fsSL https://raw.githubusercontent.com/rayMan-jpg/Moola/claude/kanban-feature-integration-92r3xt/.claude/kanban/install-macos.sh | bash
+```
+
+This clones the repo to `~/Moola`, creates the board, and installs a launchd agent
+(`com.moola.kanban-dispatch`) that keeps `dispatch --loop` running and restarts it at login.
+It finishes by running a smoke-test card through a real worker.
+
 ## Quick start
 
 ```bash
