@@ -16,27 +16,43 @@ TEMPLATE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Glyph — ASCII ad preview</title>
+<title>Glyph Ad Preview</title>
 <style>
-  :root {{ color-scheme: dark; }}
+  /* The player stage is dark by design in both themes; tokens keep that
+     explicit under light/dark preference and data-theme overrides. */
+  :root {{
+    color-scheme: dark;
+    --bg: #0a0a0a; --fg: #e8e8e8; --accent: #3ddc84;
+    --muted: #999; --faint: #666; --border: #222;
+  }}
+  @media (prefers-color-scheme: dark) {{
+    :root:not([data-theme="light"]) {{
+      --bg: #0a0a0a; --fg: #e8e8e8; --accent: #3ddc84;
+      --muted: #999; --faint: #666; --border: #222;
+    }}
+  }}
+  :root[data-theme="dark"] {{
+    --bg: #0a0a0a; --fg: #e8e8e8; --accent: #3ddc84;
+    --muted: #999; --faint: #666; --border: #222;
+  }}
   body {{
-    margin: 0; background: #0a0a0a; color: #e8e8e8; min-height: 100vh;
+    margin: 0; background: var(--bg); color: var(--fg); min-height: 100vh;
     font-family: 'Courier New', monospace;
     display: flex; flex-direction: column; align-items: center; gap: 16px;
     padding: 32px 16px;
   }}
-  h1 {{ font-size: 15px; letter-spacing: 3px; color: #3ddc84; margin: 0; }}
-  .stage {{ width: min(92vw, 860px); border: 1px solid #222; border-radius: 8px;
-           overflow: hidden; background: #0a0a0a; }}
+  h1 {{ font-size: 15px; letter-spacing: 3px; color: var(--accent); margin: 0; }}
+  .stage {{ width: min(92vw, 860px); border: 1px solid var(--border); border-radius: 8px;
+           overflow: hidden; background: var(--bg); }}
   canvas {{ display: block; width: 100%; }}
   .bar {{
     width: min(92vw, 860px); display: flex; justify-content: space-between;
-    align-items: center; font-size: 13px; color: #999;
+    align-items: center; font-size: 13px; color: var(--muted);
   }}
-  .earn {{ color: #3ddc84; font-weight: bold; }}
-  .note {{ max-width: 640px; font-size: 12px; color: #666; text-align: center; line-height: 1.6; }}
+  .earn {{ color: var(--accent); font-weight: bold; }}
+  .note {{ max-width: 640px; font-size: 12px; color: var(--faint); text-align: center; line-height: 1.6; }}
   button {{
-    background: none; border: 1px solid #3ddc84; color: #3ddc84; padding: 6px 18px;
+    background: none; border: 1px solid var(--accent); color: var(--accent); padding: 6px 18px;
     font-family: inherit; font-size: 13px; cursor: pointer; border-radius: 4px;
   }}
 </style>
