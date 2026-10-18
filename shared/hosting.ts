@@ -158,7 +158,9 @@ export function recommendHosts(c: Ctx): HostOption[] {
     );
   }
 
-  out.sort((a, b) => b.score - a.score);
-  if (out[0]) out[0].best = true;
-  return out.slice(0, 5);
+  // Once the engine has said what the clone needs, hosts that can't run it are left out.
+  const fits = unknown ? out : out.filter((o) => o.score >= 20);
+  fits.sort((a, b) => b.score - a.score);
+  if (fits[0]) fits[0].best = true;
+  return fits.slice(0, 5);
 }

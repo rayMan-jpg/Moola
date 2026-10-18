@@ -38,8 +38,9 @@ describe('hosting recommender', () => {
     const r = recommendHosts({ ...base, manifest: m, needs: { budget: 'free', traffic: 'hobby', customDomain: false } });
     expect(r[0]).toMatchObject({ id: 'render', forkFirst: true });
     expect(r[0].deployUrl).toBe(`https://render.com/deploy?repo=${encodeURIComponent(base.repoUrl)}`);
-    expect(r.findIndex((h) => h.id === 'fly')).toBeGreaterThan(r.findIndex((h) => h.id === 'render'));
+    expect(r.some((h) => h.id === 'fly')).toBe(false); // no free tier
     expect(r.some((h) => h.id === 'koyeb')).toBe(false);
+    expect(r.some((h) => h.id === 'cloudflare' || h.id === 'netlify')).toBe(false); // can't run a Node + Postgres server
   });
 
   it('sqlite + cron + serious traffic with money: volumes hosts win', () => {

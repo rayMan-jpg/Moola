@@ -247,6 +247,12 @@ details.more summary { cursor: pointer; font-family: var(--display); letter-spac
 details.more[open] summary { margin-bottom: 10px; }
 
 .pads { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 12px; }
+/* launchpads: one row per chain on desktop (3 + 3) */
+#pads { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 600px) { #pads { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.pad__name { overflow-wrap: anywhere; }
+/* the display font has no µ glyph */
+.mu { font-family: var(--body); font-weight: 700; text-transform: none; }
 .pad {
   position: relative;
   display: flex;

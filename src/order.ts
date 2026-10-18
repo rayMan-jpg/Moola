@@ -211,7 +211,7 @@ function renderPads() {
     return `<button type="button" class="pad" role="radio" aria-checked="${on}" tabindex="${on ? 0 : -1}" data-pad="${p.id}"${p.soon ? ' aria-disabled="true" disabled' : ''}>
       ${p.badge || p.soon ? `<span class="pad__badge" aria-hidden="true">${esc(p.soon ? 'SOON' : p.badge!)}</span>` : ''}
       <span class="pad__chain pad__chain--${p.chain}">${esc(CHAIN_LABEL[p.chain])}</span>
-      <span class="pad__name">${esc(p.name)}</span>
+      <span class="pad__name">${esc(p.name).replace('µ', '<span class="mu">µ</span>')}</span>
       <span class="pad__meta">${esc(p.tagline)}</span>
       <span class="pad__meta mono">${p.soon ? 'coming next' : `${p.prompts} wallet prompt${p.prompts > 1 ? 's' : ''} total`}</span>
     </button>`;

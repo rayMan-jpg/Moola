@@ -429,6 +429,7 @@ test('project page: paused job offers top-ups, finished job shows spec + ranked 
   await page.reload();
   await expect(page.locator('.badge')).toHaveText('OUT OF BUDGET');
   await expect(page.locator('.topup')).toContainText('Top up');
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/project-paused-${test.info().project.name}.png` });
 
   w.engine.snapshot = { status: 'idle', spentCents: 1400, outcome: { result: 'satisfied', explanation: 'ok', iteration: 1 } };
   w.engine.events = [{ id: 'e2', type: 'session.status_idle', at: new Date().toISOString(), stopReason: 'end_turn' }];
@@ -466,4 +467,5 @@ test('project page: paused job offers top-ups, finished job shows spec + ranked 
   await expect(page.locator('.md table')).toContainText('Browse');
   await expect(page.locator('.md')).toContainText('<script>alert(1)</script>');
   expect(await page.locator('.md script').count()).toBe(0);
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/project-done-${test.info().project.name}.png`, fullPage: true });
 });
