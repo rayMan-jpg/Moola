@@ -84,7 +84,7 @@ export function recommendHosts(c: Ctx): HostOption[] {
       deployUrl: cfReady || unknown ? `https://deploy.workers.cloudflare.com/?url=${repo}` : undefined,
       steps: cfReady || unknown ? undefined : 'needs a wrangler.jsonc in the repo (Workers + static assets)',
     },
-    (isStatic ? (cfReady ? 76 : 50) : workersNative ? 85 : unknown ? 40 : 5) + (serious ? 15 : 0) + (need.cron && workersNative ? 5 : 0),
+    (isStatic ? (cfReady ? 76 : 50) : workersNative ? 85 : unknown ? 40 : 5) + (serious && (isStatic || cfReady) ? 15 : 0) + (need.cron && workersNative ? 5 : 0),
   );
 
   add(
@@ -133,7 +133,8 @@ export function recommendHosts(c: Ctx): HostOption[] {
       },
       (unknown ? 30 : 62) + (db !== 'none' ? 10 : 0) + (need.cron ? 10 : 0) + (need.websockets ? 6 : 0) + (serious ? 10 : 0) - (free ? 40 : 0),
     );
-    add(
+    // no free tier: only offered when the user can pay
+    if (!free) add(
       {
         id: 'fly',
         name: 'Fly.io',
