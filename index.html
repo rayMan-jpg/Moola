@@ -10,6 +10,10 @@
     <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta property="og:title" content="MOOLA — 1 click = 1 coin" />
     <meta property="og:description" content="Turn any AI agent into a Solana coin. Launch on pump.fun, Jupiter Studio or Bonk.fun straight from your wallet." />
+    <script>
+      // Older iOS/Safari (< 15.4) lack these; the crypto libs need Object.hasOwn at load time.
+      if (!Object.hasOwn) Object.hasOwn = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+    </script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%23ffe600' stroke='%230a0a0a' stroke-width='8'/><text x='50' y='68' font-size='54' text-anchor='middle' font-family='Impact' fill='%230a0a0a'>$</text></svg>" />
   </head>
   <body>
@@ -27,13 +31,13 @@
 
     <section class="hero" id="top">
       <h1>ANY AI AGENT.<br /><span class="hl">ONE CLICK.</span> NOW IT'S A COIN.</h1>
-      <p>We forked <a href="https://github.com/affaan-m/ECC" target="_blank" rel="noopener">ECC</a>'s whole agent arsenal and gave it a ticker. Pick an agent, we cook the name, logo and lore, you send it to <span id="pad-names">pump.fun</span> with <b>one wallet signature</b>. no forms. no brakes.</p>
+      <p>We forked <a href="https://github.com/affaan-m/ECC" target="_blank" rel="noopener">ECC</a>'s whole agent arsenal and gave it a ticker. Pick an agent, we cook the name, logo and lore, you send it to <span id="pad-names">pump.fun</span> with <b>one wallet signature</b> (two on Jupiter). no forms. no brakes.</p>
       <div class="hero__stats" id="stats"></div>
     </section>
 
     <main class="main">
       <section class="panel launcher" id="launch" aria-labelledby="launch-title">
-        <h2 class="panel__title" id="launch-title">THE LAUNCH PAD <small>3 fields, 1 signature</small></h2>
+        <h2 class="panel__title" id="launch-title">THE LAUNCH PAD <small id="launch-sub">3 fields, 1 signature</small></h2>
 
         <form id="launch-form" novalidate>
           <fieldset id="launch-fields" class="bare">
@@ -46,19 +50,19 @@
               <button class="btn btn--small btn--yellow" type="button" id="reroll">Reroll the meme</button>
               <label class="btn btn--small btn--ghost" for="image-input">Upload own pic</label>
               <input class="sr-only" type="file" id="image-input" accept="image/png,image/jpeg,image/gif,image/webp" />
-              <span class="art__hint" id="art-hint">auto-generated logo. or upload a png/jpg/gif under 4 MB.</span>
+              <span class="art__hint" id="art-hint" aria-live="polite"></span>
             </div>
           </div>
 
           <div class="row">
             <label class="field">
-              <span class="field__label">Name <span class="count" id="name-count"></span></span>
-              <input class="input" id="name" name="name" autocomplete="off" maxlength="40" required />
+              <span class="field__label">Name <span class="count" id="name-count" aria-hidden="true"></span></span>
+              <input class="input" id="name" name="name" autocomplete="off" maxlength="40" required aria-describedby="name-err" />
               <span class="field__err" id="name-err" role="alert"></span>
             </label>
             <label class="field">
               <span class="field__label">Ticker</span>
-              <input class="input input--ticker" id="ticker" name="ticker" autocomplete="off" maxlength="10" required />
+              <input class="input input--ticker" id="ticker" name="ticker" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="10" required aria-describedby="ticker-err" />
               <span class="field__err" id="ticker-err" role="alert"></span>
             </label>
           </div>
@@ -66,8 +70,8 @@
           <details class="more">
             <summary>Lore + socials (optional)</summary>
             <label class="field">
-              <span class="field__label">Description <span class="count" id="desc-count"></span></span>
-              <textarea class="input" id="description" name="description" rows="3"></textarea>
+              <span class="field__label">Description <span class="count" id="desc-count" aria-hidden="true"></span></span>
+              <textarea class="input" id="description" name="description" rows="3" aria-describedby="description-err"></textarea>
               <span class="field__err" id="description-err" role="alert"></span>
             </label>
             <label class="field"><span class="field__label">X / Twitter</span><input class="input" id="twitter" type="url" inputmode="url" placeholder="https://x.com/..." /></label>
@@ -85,7 +89,7 @@
             <div class="chips" id="buy-chips" role="group" aria-labelledby="buy-label"></div>
           </div>
 
-          <div class="summary" id="summary" aria-live="polite"></div>
+          <div class="summary" id="summary"></div>
 
           <button class="btn btn--huge" id="send-it" type="submit">SEND IT</button>
           </fieldset>
@@ -105,10 +109,11 @@
       <section class="panel" id="catalog" aria-labelledby="catalog-title">
         <h2 class="panel__title" id="catalog-title">THE ARSENAL <small>forked from ECC · pick one to meme it</small></h2>
         <div class="catalog__bar">
-          <div class="tabs" role="tablist" id="tabs"></div>
+          <div class="tabs" role="group" aria-label="Catalog section" id="tabs"></div>
           <input class="input search" id="search" type="search" placeholder="search agents, skills, commands..." aria-label="Search the arsenal" />
         </div>
-        <div class="grid" id="grid" aria-live="polite"></div>
+        <p class="sr-only" id="grid-count" aria-live="polite"></p>
+        <div class="grid" id="grid"></div>
         <button class="btn btn--ghost more-btn" id="more" type="button" hidden>Show more</button>
       </section>
     </main>
@@ -126,7 +131,9 @@
       </div>
     </div>
 
-    <div class="toast" id="toast" hidden role="status"></div>
+    <div class="send-bar" id="send-bar" hidden><button class="btn btn--huge" id="send-bar-btn" type="button">SEND IT</button></div>
+    <div class="toast" id="toast" hidden aria-hidden="true"></div>
+    <div class="sr-only" id="sr-status" role="status" aria-live="polite"></div>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

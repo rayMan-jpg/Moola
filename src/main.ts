@@ -5,8 +5,11 @@ import type { Wallet } from '@wallet-standard/base';
 import { VersionedTransaction } from '@solana/web3.js';
 import { coinify, validateDraft, sanitizeTicker, emojiFor, NAME_MAX, DESC_MAX, type CatalogItem } from './coinify';
 import { drawCoinArt, canvasToBlob } from './coinArt';
-import { listWallets, onWalletsChanged, onAccountsChanged, connect, disconnect, signAndSend, signOnly, canSignOnly, canSignMessage, signMessage, txSignature, isMobile, walletDeeplinks, shortAddr, type Connected } from './wallet';
-import { getBalanceSol, sendRaw, waitForLanding, isBlockhashValid, RpcError, setCustomRpc, rpcUrls } from './rpc';
+import {
+  listWallets, onWalletsChanged, onAccountsChanged, connect, disconnect, signAndSend, signOnly, canSignOnly, canSignMessage,
+  signMessage, txSignature, isMobile, walletDeeplinks, INSTALL_LINKS, shortAddr, type Connected,
+} from './wallet';
+import { getBalanceSol, sendRaw, waitForLanding, isBlockhashValid, RpcError, setCustomRpc, rpcUrls, DEFAULT_RPCS } from './rpc';
 import { LAUNCHPADS, padById } from './launchpads';
 import type { StepId } from './launchpads/types';
 import { friendlyError } from './errors';
@@ -20,13 +23,16 @@ type TabId = 'agent' | 'skill' | 'command' | 'rule';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const PAGE = 48;
-const IMAGE_MAX = 4 * 1024 * 1024;
+/** Phone photos are big; anything is shrunk to a small logo before upload anyway. */
+const IMAGE_MAX = 20 * 1024 * 1024;
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const state = {
   catalog: null as Catalog | null,
   tab: 'agent' as TabId,
   query: '',
   shown: PAGE,
+  /** The catalog item the form was filled from; null once the user goes custom. */
   item: null as CatalogItem | null,
   reroll: 0,
   emoji: '🤖',
@@ -37,6 +43,8 @@ const state = {
   busy: false,
   /** User typed into the form; never overwrite their input with an automatic fill. */
   dirty: false,
+  /** Description text we generated; while the field still equals it, we may regenerate it. */
+  autoDesc: '',
 };
 
 const els = {
@@ -48,7 +56,10 @@ const els = {
   website: $<HTMLInputElement>('website'),
   canvas: $<HTMLCanvasElement>('art-canvas'),
   uploadImg: $<HTMLImageElement>('art-upload'),
+  imageInput: $<HTMLInputElement>('image-input'),
   send: $<HTMLButtonElement>('send-it'),
+  sendBar: $('send-bar'),
+  sendBarBtn: $<HTMLButtonElement>('send-bar-btn'),
   steps: $<HTMLOListElement>('steps'),
   msg: $('launch-msg'),
   form: $<HTMLFormElement>('launch-form'),
@@ -57,27 +68,52 @@ const els = {
   balance: $('balance'),
 };
 
-// ── toast / modal / confetti ──
+// ── announcements / toast / modal / confetti ──
+function announce(msg: string) {
+  const s = $('sr-status');
+  s.textContent = '';
+  requestAnimationFrame(() => (s.textContent = msg));
+}
+
 let toastTimer = 0;
 function toast(msg: string) {
   const t = $('toast');
   t.textContent = msg;
   t.hidden = false;
+  announce(msg);
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => (t.hidden = true), 2600);
 }
 
+const BACKGROUND = ['.marquee', '.header', '#top', 'main', '.footer', '#send-bar'];
+function setInert(on: boolean) {
+  for (const sel of BACKGROUND) {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (el) el.inert = on;
+  }
+}
+
 let lastFocus: HTMLElement | null = null;
 function openModal(title: string, html: string) {
-  lastFocus = document.activeElement as HTMLElement;
+  if ($('modal').hidden) lastFocus = document.activeElement as HTMLElement;
   $('modal-title').textContent = title;
   $('modal-content').innerHTML = html;
   $('modal').hidden = false;
-  ($('modal').querySelector('button, a') as HTMLElement | null)?.focus();
+  setInert(true);
+  ($('modal').querySelector('button, a, input') as HTMLElement | null)?.focus();
+}
+/** Hide the dialog and give focus back once the page has re-enabled what it disabled. */
+function hideModal() {
+  $('modal').hidden = true;
+  setInert(false);
+  const back = lastFocus;
+  setTimeout(() => {
+    const target = back && back.isConnected && !(back as HTMLButtonElement).disabled ? back : els.name;
+    target.focus({ preventScroll: true });
+  }, 0);
 }
 function closeModal() {
-  $('modal').hidden = true;
-  lastFocus?.focus();
+  hideModal();
   pendingConnect?.reject(new Error('cancelled'));
   pendingConnect = null;
 }
@@ -90,7 +126,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 function confetti() {
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (reducedMotion()) return;
   const box = document.createElement('div');
   box.className = 'confetti';
   const bits = ['🚀', '💰', '🟢', '💎', '🔥', '$', '🌙'];
@@ -126,16 +162,19 @@ async function currentImage(): Promise<Blob> {
   return canvasToBlob(els.canvas, 'image/jpeg');
 }
 
-$('image-input').addEventListener('change', async (e) => {
-  const f = (e.target as HTMLInputElement).files?.[0];
+const ART_HINT = 'auto-generated logo. or upload a png/jpg/gif/webp.';
+
+els.imageInput.addEventListener('change', async () => {
+  const f = els.imageInput.files?.[0];
+  els.imageInput.value = ''; // so picking the same file again still fires 'change'
   if (!f) return;
-  if (!/^image\/(png|jpe?g|gif|webp)$/.test(f.type)) return toast('png, jpg, gif or webp only ser');
-  if (f.size > IMAGE_MAX) return toast('max 4 MB, this is not a museum');
+  if (!/^image\/(png|jpe?g|gif|webp)$/.test(f.type)) return artError('png, jpg, gif or webp only ser');
+  if (f.size > IMAGE_MAX) return artError('max 20 MB, this is not a museum');
   let clean: Blob;
   try {
     clean = await stripImageMetadata(f); // drops EXIF/GPS before anything gets published
   } catch {
-    return toast("couldn't read that image, try another");
+    return artError("couldn't read that image, try another");
   }
   state.upload = clean;
   if (els.uploadImg.src.startsWith('blob:')) URL.revokeObjectURL(els.uploadImg.src);
@@ -143,15 +182,22 @@ $('image-input').addEventListener('change', async (e) => {
   els.uploadImg.hidden = false;
   els.canvas.hidden = true;
   $('art-hint').textContent = `${f.name} locked in. reroll to go back to the auto meme.`;
+  announce('picture uploaded');
 });
+
+function artError(msg: string) {
+  $('art-hint').textContent = msg;
+  announce(msg);
+}
 
 $('reroll').addEventListener('click', () => {
   state.upload = null;
   els.uploadImg.hidden = true;
   els.canvas.hidden = false;
-  $('art-hint').textContent = 'auto-generated logo. or upload a png/jpg/gif under 4 MB.';
+  $('art-hint').textContent = ART_HINT;
   state.reroll++;
-  if (state.item) fillFromItem(state.item, state.reroll, false);
+  // From the catalog: new name + art. Custom coin: only new art, never touch what the user typed.
+  if (state.item && !state.dirty) fillFromItem(state.item, state.reroll, false);
   else renderArt();
 });
 
@@ -160,77 +206,116 @@ function fillFromItem(item: CatalogItem, reroll = 0, scroll = true) {
   if (state.busy) return toast('hold up, a launch is in progress');
   state.item = item;
   state.reroll = reroll;
+  state.dirty = false;
   const c = coinify(item, reroll);
   els.name.value = c.name;
   els.ticker.value = c.ticker;
   els.description.value = c.description;
+  state.autoDesc = c.description;
   state.emoji = c.emoji;
   updateCounts();
   clearErrors();
   scheduleArt();
   updateSummary();
   if (scroll) {
-    $('launch').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    $('launch').scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' });
     els.send.focus({ preventScroll: true });
     history.replaceState(null, '', `#/${item.kind}/${encodeURIComponent(item.id)}`);
+    announce(`${c.name}, $${c.ticker} loaded into the launch pad`);
   }
+}
+
+function customDescription(): string {
+  const name = els.name.value.trim() || 'this coin';
+  const t = sanitizeTicker(els.ticker.value) || 'MOOLA';
+  return `${name} ($${t}). no roadmap, no utility, just vibes. launched with MOOLA.`;
+}
+
+/** The user typed their own coin: stop treating the form as a catalog item. */
+function goCustom() {
+  state.dirty = true;
+  state.item = null;
+  if (els.description.value === state.autoDesc) {
+    els.description.value = state.autoDesc = customDescription();
+  }
+  state.emoji = emojiFor(els.name.value, els.ticker.value);
+  updateCounts();
 }
 
 function updateCounts() {
   $('name-count').textContent = `${new TextEncoder().encode(els.name.value).length}/${NAME_MAX}`;
   $('desc-count').textContent = `${[...els.description.value].length}/${DESC_MAX}`;
 }
+const FIELDS = ['name', 'ticker', 'description'] as const;
 function clearErrors() {
-  for (const k of ['name', 'ticker', 'description']) $(`${k}-err`).textContent = '';
+  for (const k of FIELDS) {
+    $(`${k}-err`).textContent = '';
+    $(k).removeAttribute('aria-invalid');
+  }
 }
 
-els.form.addEventListener('input', (e) => {
-  if ((e as InputEvent).isTrusted) state.dirty = true;
+els.name.addEventListener('input', (e) => {
+  if (e.isTrusted) goCustom();
+  updateCounts();
+  scheduleArt();
+  updateSummary();
 });
 
-els.name.addEventListener('input', () => {
-  updateCounts();
-  if (!state.item) state.emoji = emojiFor(els.name.value);
-  scheduleArt();
-  updateSummary();
-});
-els.ticker.addEventListener('input', () => {
+function normalizeTicker() {
+  const v = sanitizeTicker(els.ticker.value);
+  if (!state.item && els.description.value === state.autoDesc && state.autoDesc) {
+    els.description.value = state.autoDesc = customDescription();
+  }
+  if (v === els.ticker.value) return;
   const pos = els.ticker.selectionStart;
-  els.ticker.value = sanitizeTicker(els.ticker.value);
-  if (pos !== null) els.ticker.setSelectionRange(pos, pos);
+  els.ticker.value = v;
+  if (pos !== null && document.activeElement === els.ticker) els.ticker.setSelectionRange(Math.min(pos, v.length), Math.min(pos, v.length));
+}
+els.ticker.addEventListener('input', (e) => {
+  if (e.isTrusted) goCustom();
+  // Don't rewrite the value mid-composition (Android/CJK keyboards duplicate text if we do).
+  if (!(e as InputEvent).isComposing) normalizeTicker();
   scheduleArt();
   updateSummary();
 });
-els.description.addEventListener('input', updateCounts);
+els.ticker.addEventListener('compositionend', () => {
+  normalizeTicker();
+  updateSummary();
+});
+els.ticker.addEventListener('blur', normalizeTicker);
+els.description.addEventListener('input', (e) => {
+  if (e.isTrusted) state.dirty = true;
+  updateCounts();
+});
+for (const el of [els.twitter, els.telegram, els.website]) el.addEventListener('input', () => (state.dirty = true));
 
 function renderPads() {
   $('pads').innerHTML = LAUNCHPADS.map(
-    (p) => `<button type="button" class="pad" role="radio" aria-checked="${p.id === state.pad}" data-pad="${p.id}">
-      ${p.badge ? `<span class="pad__badge">${esc(p.badge)}</span>` : ''}
+    (p) => `<button type="button" class="pad" role="radio" aria-checked="${p.id === state.pad}" tabindex="${p.id === state.pad ? 0 : -1}" data-pad="${p.id}">
+      ${p.badge ? `<span class="pad__badge" aria-hidden="true">${esc(p.badge)}</span>` : ''}
       <span class="pad__name">${esc(p.name)}</span>
       <span class="pad__meta">${esc(p.tagline)}</span>
       <span class="pad__meta mono">${p.signatures} signature${p.signatures > 1 ? 's' : ''}${p.devBuy ? '' : ' · no dev buy'}</span>
     </button>`,
   ).join('');
 }
-$('pads').addEventListener('click', (e) => {
-  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-pad]');
-  if (!b) return;
-  state.pad = b.dataset.pad!;
+function selectPad(id: string, focus: boolean) {
+  state.pad = id;
   renderPads();
   renderBuys();
   updateSummary();
+  if (focus) ($('pads').querySelector(`[data-pad="${id}"]`) as HTMLElement | null)?.focus();
+}
+$('pads').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLElement>('[data-pad]');
+  if (b) selectPad(b.dataset.pad!, true);
 });
 $('pads').addEventListener('keydown', (e) => {
   if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(e.key)) return;
   e.preventDefault();
   const i = LAUNCHPADS.findIndex((p) => p.id === state.pad);
   const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
-  state.pad = LAUNCHPADS[(i + d + LAUNCHPADS.length) % LAUNCHPADS.length].id;
-  renderPads();
-  renderBuys();
-  updateSummary();
-  ($('pads').querySelector(`[data-pad="${state.pad}"]`) as HTMLElement).focus();
+  selectPad(LAUNCHPADS[(i + d + LAUNCHPADS.length) % LAUNCHPADS.length].id, true);
 });
 
 const BUYS = [0, 0.1, 0.5, 1];
@@ -253,6 +338,7 @@ $('buy-chips').addEventListener('click', (e) => {
   state.devBuy = Number(b.dataset.buy);
   renderBuys();
   updateSummary();
+  ($('buy-chips').querySelector(`[data-buy="${b.dataset.buy}"]`) as HTMLElement | null)?.focus();
 });
 $('buy-chips').addEventListener('input', (e) => {
   const t = e.target as HTMLInputElement;
@@ -270,7 +356,10 @@ function updateSummary() {
   const buy = devBuy > 0 ? `<b>${devBuy} SOL</b> dev buy + ` : 'no dev buy, ';
   renderStepLabels();
   $('summary').innerHTML = `Launching <b>$${esc(t)}</b> on <b>${esc(pad.name)}</b>: ${buy}${esc(pad.costHint)}.`;
-  els.send.textContent = state.wallet ? `SEND IT ($${t})` : 'CONNECT + SEND IT';
+  $('launch-sub').textContent = `3 fields, ${pad.signatures} signature${pad.signatures > 1 ? 's' : ''}`;
+  const label = state.wallet ? `SEND IT ($${t})` : 'CONNECT + SEND IT';
+  els.send.textContent = label;
+  els.sendBarBtn.textContent = label;
 }
 
 // ── wallet ──
@@ -290,6 +379,64 @@ async function ensureWallet(): Promise<Connected> {
   });
 }
 
+// ── draft hand-off: carry the coin into a wallet's in-app browser ──
+interface Draft { n: string; t: string; d: string; p: string; b: number; i?: [string, string]; r: number; s?: [string, string, string] }
+
+function encodeDraft(): string {
+  const draft: Draft = {
+    n: els.name.value, t: els.ticker.value, d: els.description.value, p: state.pad, b: state.devBuy, r: state.reroll,
+    i: state.item ? [state.item.kind, state.item.id] : undefined,
+    s: [els.twitter.value, els.telegram.value, els.website.value],
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(draft));
+  let bin = '';
+  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function decodeDraft(s: string): Draft | null {
+  try {
+    const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+    const d = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)))) as Draft;
+    return typeof d.n === 'string' && typeof d.t === 'string' ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+function handoffUrl(): string {
+  const u = new URL(location.href);
+  u.searchParams.set('d', encodeDraft());
+  return u.toString();
+}
+
+function restoreDraft(): boolean {
+  const u = new URL(location.href);
+  const raw = u.searchParams.get('d');
+  if (!raw) return false;
+  u.searchParams.delete('d');
+  history.replaceState(null, '', u.toString());
+  const d = decodeDraft(raw);
+  if (!d) return false;
+  if (d.i) state.item = items(d.i[0] === 'agent' ? 'agent' : d.i[0] === 'command' ? 'command' : 'skill').find((x) => x.id === d.i![1]) ?? null;
+  state.reroll = d.r || 0;
+  els.name.value = d.n.slice(0, 64);
+  els.ticker.value = sanitizeTicker(d.t);
+  els.description.value = d.d.slice(0, DESC_MAX);
+  [els.twitter.value, els.telegram.value, els.website.value] = (d.s ?? ['', '', '']).map((x) => String(x).slice(0, 200));
+  if (LAUNCHPADS.some((p) => p.id === d.p)) state.pad = d.p;
+  state.devBuy = Math.min(Math.max(Number(d.b) || 0, 0), 85);
+  state.emoji = emojiFor(state.item?.id ?? d.n, d.d);
+  state.dirty = true;
+  renderPads();
+  renderBuys();
+  updateCounts();
+  scheduleArt();
+  updateSummary();
+  toast('your coin made it over. hit SEND IT');
+  return true;
+}
+
 function showWalletPicker() {
   const wallets = listWallets();
   if (wallets.length) {
@@ -301,7 +448,7 @@ function showWalletPicker() {
       b.addEventListener('click', async () => {
         const p = pendingConnect;
         pendingConnect = null;
-        $('modal').hidden = true;
+        hideModal();
         try {
           const c = await doConnect(wallets[Number(b.dataset.wallet)]);
           p?.resolve(c);
@@ -312,11 +459,16 @@ function showWalletPicker() {
     );
     return;
   }
-  const links = walletDeeplinks(location.href);
+  const deeplinks = walletDeeplinks(handoffUrl());
+  const phone = `<div class="wallets">${deeplinks.map((l) => `<a class="wallet-btn" href="${esc(l.url)}">Open in ${esc(l.name)}</a>`).join('')}</div>`;
+  const carry = state.upload ? '<p class="art__hint">your coin details come along; re-upload your pic there.</p>' : '<p class="art__hint">your coin details come along.</p>';
   openModal(
     'NO WALLET DETECTED',
-    `<p>${isMobile() ? 'Open MOOLA inside your wallet app, then hit SEND IT again:' : 'Install a Solana wallet extension (Phantom, Solflare or Backpack), refresh, and hit SEND IT again. On your phone? Use these:'}</p>
-     <div class="wallets">${links.map((l) => `<a class="wallet-btn" href="${esc(l.url)}">Open in ${esc(l.name)}</a>`).join('')}</div>`,
+    isMobile()
+      ? `<p>Open MOOLA inside your wallet app, then hit SEND IT again:</p>${phone}${carry}`
+      : `<p>Install a Solana wallet extension, refresh, and hit SEND IT again:</p>
+         <div class="wallets">${INSTALL_LINKS.map((l) => `<a class="wallet-btn" href="${esc(l.url)}" target="_blank" rel="noopener">Get ${esc(l.name)}</a>`).join('')}</div>
+         <h3 class="field__label" style="margin-top:16px">On your phone?</h3><p class="art__hint">Open these links on the phone that has the wallet app.</p>${phone}`,
   );
 }
 
@@ -361,25 +513,44 @@ async function refreshBalance() {
 }
 
 function renderWallet() {
-  els.walletBtn.textContent = state.wallet ? shortAddr(state.wallet.address) : 'Connect wallet';
-  els.walletBtn.title = state.wallet ? 'Click to disconnect' : '';
-  if (!state.wallet) els.balance.hidden = true;
+  const w = state.wallet;
+  els.walletBtn.textContent = w ? shortAddr(w.address) : 'Connect wallet';
+  if (w) els.walletBtn.setAttribute('aria-label', `Wallet ${shortAddr(w.address)}: copy address or disconnect`);
+  else els.walletBtn.removeAttribute('aria-label');
+  if (!w) els.balance.hidden = true;
   else refreshBalance();
   updateSummary();
 }
 
+async function forgetWallet() {
+  await disconnect(state.wallet);
+  stopAccountWatch();
+  state.wallet = null;
+  try {
+    localStorage.removeItem(LAST_WALLET);
+  } catch {
+    /* ignore */
+  }
+  renderWallet();
+}
+
 els.walletBtn.addEventListener('click', async () => {
-  if (state.wallet) {
-    await disconnect(state.wallet);
-    stopAccountWatch();
-    state.wallet = null;
-    try {
-      localStorage.removeItem(LAST_WALLET);
-    } catch {
-      /* ignore */
-    }
-    renderWallet();
-    toast('disconnected. paper hands.');
+  const w = state.wallet;
+  if (w) {
+    openModal(
+      'YOUR WALLET',
+      `<p class="mono" style="word-break:break-all">${esc(w.address)}</p>
+       <div class="wallets"><button class="wallet-btn" type="button" id="w-copy">Copy address</button><button class="wallet-btn" type="button" id="w-off">Disconnect</button></div>`,
+    );
+    $('w-copy').addEventListener('click', () => {
+      navigator.clipboard?.writeText(w.address).then(() => toast('address copied'), () => toast('copy failed, select it manually'));
+      hideModal();
+    });
+    $('w-off').addEventListener('click', async () => {
+      hideModal();
+      await forgetWallet();
+      toast('disconnected. paper hands.');
+    });
     return;
   }
   try {
@@ -400,8 +571,11 @@ const DEFAULT_STEP_LABELS: Record<StepId, string> = {
   sign: 'Sign in your wallet',
   confirm: 'Waiting for the chain',
 };
+function stepLabels(): Record<StepId, string> {
+  return { ...DEFAULT_STEP_LABELS, ...padById(state.pad).stepLabels };
+}
 function renderStepLabels() {
-  const labels = { ...DEFAULT_STEP_LABELS, ...padById(state.pad).stepLabels };
+  const labels = stepLabels();
   els.steps.querySelectorAll<HTMLElement>('li').forEach((li) => (li.textContent = labels[li.dataset.step as StepId]));
 }
 
@@ -410,16 +584,21 @@ function setStep(step: StepId | null, mode: 'active' | 'error' = 'active') {
   const idx = step ? order.indexOf(step) : -1;
   els.steps.querySelectorAll<HTMLElement>('li').forEach((li, i) => {
     li.dataset.state = i < idx ? 'done' : i === idx ? mode : '';
+    if (i === idx) li.setAttribute('aria-current', 'step');
+    else li.removeAttribute('aria-current');
   });
+  if (step && mode === 'active') announce(stepLabels()[step]);
 }
 
 function showMsg(html: string, ok = false) {
   els.msg.innerHTML = html ? `<div class="alert${ok ? ' alert--ok' : ''}">${html}</div>` : '';
+  if (html) els.msg.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
 }
 
 function lockForm(locked: boolean) {
   state.busy = locked;
   $<HTMLFieldSetElement>('launch-fields').disabled = locked;
+  updateSendBar();
 }
 
 els.form.addEventListener('submit', async (e) => {
@@ -427,10 +606,14 @@ els.form.addEventListener('submit', async (e) => {
   if (state.busy) return;
   clearErrors();
   showMsg('');
+  normalizeTicker();
   const draft = { name: els.name.value.trim(), ticker: sanitizeTicker(els.ticker.value), description: els.description.value.trim() };
   const v = validateDraft(draft);
   if (!v.ok) {
-    for (const [k, msg] of Object.entries(v.errors)) $(`${k}-err`).textContent = msg ?? '';
+    for (const [k, msg] of Object.entries(v.errors)) {
+      $(`${k}-err`).textContent = msg ?? '';
+      $(k)?.setAttribute('aria-invalid', 'true');
+    }
     const first = Object.keys(v.errors)[0];
     if (first === 'description') ($('launch').querySelector('details') as HTMLDetailsElement).open = true;
     $(first)?.focus();
@@ -454,12 +637,13 @@ els.form.addEventListener('submit', async (e) => {
     const image = await currentImage();
     const wallet = await ensureWallet();
     if (pad.requires?.includes('signTransaction') && !canSignOnly(wallet)) {
-      throw friendly(`${wallet.wallet.name} can't do ${pad.name} launches (it can't sign without sending). use Phantom, Solflare or Backpack, or pick another launchpad.`);
+      throw friendly(`this wallet can't do ${pad.name} launches (it can't sign without sending). use Phantom, Solflare or Backpack, or pick another launchpad.`);
     }
     if (pad.requires?.includes('signMessage') && !canSignMessage(wallet)) {
-      throw friendly(`${pad.name} wants a signed login message and ${wallet.wallet.name} can't sign messages (Ledger?). pick another launchpad.`);
+      throw friendly(`${pad.name} wants a signed login message and this wallet can't sign messages (Ledger?). pick another launchpad.`);
     }
     els.steps.hidden = false;
+    els.steps.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
     // Cheap pre-flight so people with an empty wallet don't upload + sign for nothing.
     const bal = await getBalanceSol(wallet.address).catch(() => null);
     const need = devBuySol + pad.overheadSol;
@@ -518,6 +702,7 @@ els.form.addEventListener('submit', async (e) => {
     } else {
       if (current) setStep(current, 'error');
       showMsg(esc(friendlyError(err)));
+      announce(friendlyError(err));
     }
   } finally {
     lockForm(false);
@@ -557,7 +742,7 @@ function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: str
   els.result.hidden = false;
   els.result.dataset.via = r.via ?? '';
   els.result.innerHTML = `
-    <h3>$${esc(r.ticker)} ${r.confirmed ? 'IS LIVE' : 'IS SENT'}</h3>
+    <h3 tabindex="-1">$${esc(r.ticker)} ${r.confirmed ? 'IS LIVE' : 'IS SENT'}</h3>
     <p>${r.confirmed ? 'confirmed on Solana. you are now a dev. act like it.' : "sent, but the RPC hasn't confirmed it yet. check the tx link before launching again, it may still land."}</p>
     <div class="ca"><span>${esc(r.mint)}</span><button class="btn btn--small btn--yellow" type="button" data-copy="${esc(r.mint)}">Copy CA</button></div>
     <div class="result__links">
@@ -568,6 +753,10 @@ function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: str
     </div>
     <p style="margin-top:16px"><button class="btn btn--yellow" type="button" id="again">Launch another</button></p>`;
   if (r.confirmed) confetti();
+  updateSendBar();
+  els.result.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
+  els.result.querySelector<HTMLElement>('h3')?.focus({ preventScroll: true });
+  announce(`${r.ticker} ${r.confirmed ? 'is live' : 'was sent'} on ${r.pad}`);
   els.result.querySelector<HTMLElement>('[data-copy]')?.addEventListener('click', (e) => {
     navigator.clipboard?.writeText((e.currentTarget as HTMLElement).dataset.copy!).then(() => toast('CA copied'), () => toast('copy failed, select it manually'));
   });
@@ -578,8 +767,24 @@ function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: str
     showMsg('');
     state.reroll++;
     if (state.item) fillFromItem(state.item, state.reroll, false);
+    updateSendBar();
+    els.name.focus();
   });
 }
+
+// ── sticky SEND IT bar: the launch button is always one tap away ──
+let sendVisible = true;
+function updateSendBar() {
+  els.sendBar.hidden = sendVisible || state.busy || els.form.hidden || !$('modal').hidden;
+}
+new IntersectionObserver((entries) => {
+  sendVisible = entries.some((en) => en.isIntersecting);
+  updateSendBar();
+}).observe(els.send);
+els.sendBarBtn.addEventListener('click', () => {
+  $('launch').scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' });
+  els.form.requestSubmit();
+});
 
 // ── catalog (the ECC dashboard, degen edition) ──
 function items(tab: TabId): CatalogItem[] {
@@ -606,7 +811,7 @@ function renderTabs() {
     ['rule', 'Rules', c?.rules.length ?? 0],
   ];
   $('tabs').innerHTML = tabs
-    .map(([id, label, n]) => `<button class="tab" role="tab" type="button" aria-selected="${state.tab === id}" data-tab="${id}">${label}<span class="n">${n}</span></button>`)
+    .map(([id, label, n]) => `<button class="tab" type="button" aria-pressed="${state.tab === id}" data-tab="${id}">${label}<span class="n">${n}</span></button>`)
     .join('');
 }
 $('tabs').addEventListener('click', (e) => {
@@ -616,6 +821,7 @@ $('tabs').addEventListener('click', (e) => {
   state.shown = PAGE;
   renderTabs();
   renderGrid();
+  ($('tabs').querySelector(`[data-tab="${state.tab}"]`) as HTMLElement | null)?.focus();
 });
 
 let searchTimer = 0;
@@ -639,12 +845,12 @@ function renderGrid() {
           return `<article class="card">
           <div class="card__top">
             <div class="card__emoji" aria-hidden="true">${c.emoji}</div>
-            <div><div class="kind">${i.kind === 'skill' && state.tab === 'rule' ? 'rule set' : i.kind}</div><div class="card__title">${esc(i.title)}</div><div class="card__ticker">$${esc(c.ticker)}</div></div>
+            <div><div class="kind">${i.kind === 'skill' && state.tab === 'rule' ? 'rule set' : i.kind}</div><h3 class="card__title">${esc(i.title)}</h3><div class="card__ticker">$${esc(c.ticker)}</div></div>
           </div>
           <p class="card__desc">${esc(i.description || 'no lore yet. you write it.')}</p>
           <div class="card__actions">
-            <button class="btn btn--small" type="button" data-meme="${esc(i.kind)}|${esc(i.id)}">Meme it</button>
-            ${state.tab === 'rule' ? '' : `<button class="btn btn--small btn--ghost" type="button" data-lore="${esc(i.kind)}|${esc(i.id)}">Lore</button>`}
+            <button class="btn btn--small" type="button" data-meme="${esc(i.kind)}|${esc(i.id)}" aria-label="Meme ${esc(i.title)}">Meme it</button>
+            ${state.tab === 'rule' ? '' : `<button class="btn btn--small btn--ghost" type="button" data-lore="${esc(i.kind)}|${esc(i.id)}" aria-label="Lore for ${esc(i.title)}">Lore</button>`}
           </div>
         </article>`;
         })
@@ -652,6 +858,7 @@ function renderGrid() {
     : `<div class="empty">nothing matches "${esc(q)}". ngmi. try another word.</div>`;
   $('more').hidden = all.length <= state.shown;
   $('more').textContent = `Show more (${all.length - state.shown} left)`;
+  $('grid-count').textContent = `${all.length} result${all.length === 1 ? '' : 's'}`;
 }
 $('more').addEventListener('click', () => {
   state.shown += PAGE;
@@ -680,7 +887,7 @@ $('grid').addEventListener('click', (e) => {
        <p style="margin-top:12px"><button class="btn" type="button" id="lore-meme">Meme this one</button></p>`,
     );
     $('lore-meme').addEventListener('click', () => {
-      $('modal').hidden = true;
+      hideModal();
       const item = items(r.k === 'agent' ? 'agent' : r.k === 'command' ? 'command' : 'skill').find((i) => i.id === r.id);
       if (item) fillFromItem(item);
     });
@@ -689,18 +896,12 @@ $('grid').addEventListener('click', (e) => {
 
 function renderPadNames() {
   const names = LAUNCHPADS.map((p) => p.name);
-  $('pad-names').textContent = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : names[0];
+  $('pad-names').textContent = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}` : names[0];
 }
 
 function renderStatsAndMarquee() {
   const c = state.catalog!;
-  $('stats').innerHTML = [
-    `${c.agents.length} agents`,
-    `${c.skills.length} skills`,
-    `${c.commands.length} commands`,
-    `${LAUNCHPADS.length} launchpads`,
-    '1 signature',
-  ]
+  $('stats').innerHTML = [`${c.agents.length} agents`, `${c.skills.length} skills`, `${c.commands.length} commands`, `${LAUNCHPADS.length} launchpads`, '1 click']
     .map((s) => `<span class="sticker">${s}</span>`)
     .join('');
   const tickers = [...c.agents, ...c.commands].slice(0, 40).map((r) => `$${coinify({ kind: r.k, id: r.id, title: r.n, description: r.d }).ticker}`);
@@ -729,18 +930,19 @@ function routeFromHash() {
 window.addEventListener('hashchange', routeFromHash);
 
 $('rpc-btn').addEventListener('click', () => {
+  const custom = rpcUrls().length > DEFAULT_RPCS.length ? rpcUrls()[0] : '';
   openModal(
     'RPC SETTINGS',
     `<p>Public RPCs get rate limited when everyone is aping. Paste your own (Helius, QuickNode, Triton...) to make building, checks and confirmations snappy.</p>
      <p class="art__hint">Saved in this browser only. If the URL contains an API key, use a key restricted to this site's origin.</p>
-     <label class="field"><span class="field__label">Custom RPC URL</span><input class="input" id="rpc-input" type="url" placeholder="https://..." value="${esc(rpcUrls().length > 2 ? rpcUrls()[0] : '')}" /></label>
+     <label class="field"><span class="field__label">Custom RPC URL</span><input class="input" id="rpc-input" type="url" placeholder="https://..." value="${esc(custom)}" /></label>
      <button class="btn" type="button" id="rpc-save">Save</button>`,
   );
   $('rpc-save').addEventListener('click', () => {
     const v = ($('rpc-input') as HTMLInputElement).value.trim();
     if (v && !/^https:\/\//.test(v)) return toast('needs https://');
     setCustomRpc(v);
-    $('modal').hidden = true;
+    hideModal();
     toast(v ? 'RPC saved' : 'back to public RPCs');
   });
 });
@@ -764,6 +966,7 @@ async function boot() {
   renderPads();
   renderBuys();
   renderTabs();
+  $('art-hint').textContent = ART_HINT;
   const starter: CatalogItem = { kind: 'agent', id: 'moola', title: 'Moola', description: 'The agent that turns agents into coins.' };
   fillFromItem(starter, 0, false);
   state.item = null;
@@ -776,10 +979,12 @@ async function boot() {
   }
   renderStatsAndMarquee();
   renderTabs();
-  if (!routeFromHash()) {
+  // A coin handed over from another browser (wallet in-app browser) wins over the #/agent/... route.
+  const restored = restoreDraft();
+  if (restored || !routeFromHash()) {
     renderGrid();
     const first = items('agent').find((i) => i.id === 'code-reviewer') ?? items('agent')[0];
-    if (first && !state.dirty) fillFromItem(first, 0, false);
+    if (first && !state.dirty && !restored) fillFromItem(first, 0, false);
   }
   // Silent reconnect, only to the wallet this browser used last (never pops a prompt on load).
   let last = '';

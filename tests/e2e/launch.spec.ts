@@ -120,7 +120,7 @@ async function memeAgent(page: Page, query: string) {
   await page.fill('#search', query);
   const card = page.locator('#grid .card', { hasText: query }).first();
   await expect(card).toBeVisible();
-  await card.getByRole('button', { name: 'Meme it' }).click();
+  await card.getByRole('button', { name: /^Meme / }).click();
 }
 
 for (const pad of ['pump.fun', 'Bonk.fun']) {
@@ -203,6 +203,62 @@ test('form validation blocks a bad ticker before anything happens', async ({ pag
   await page.locator('#send-it').click();
   await expect(page.locator('#name-err')).toContainText('needs a name');
   expect(ctx.sent).toBe(0);
+});
+
+test('custom coin: reroll never wipes what the user typed, lore follows the name', async ({ page }) => {
+  await setup(page);
+  await page.goto('./');
+  await expect(page.locator('#grid .card').first()).toBeVisible();
+  await page.fill('#name', 'Doge Killer');
+  await page.fill('#ticker', 'dgk');
+  await page.locator('#ticker').blur();
+  await expect(page.locator('#ticker')).toHaveValue('DGK');
+  await page.getByRole('button', { name: 'Reroll the meme' }).click();
+  await expect(page.locator('#name')).toHaveValue('Doge Killer');
+  await expect(page.locator('#ticker')).toHaveValue('DGK');
+  await page.locator('details.more summary').click();
+  await expect(page.locator('#description')).toHaveValue(/^Doge Killer \(\$DGK\)/);
+});
+
+test('no wallet: hand-off link carries the coin into the wallet browser', async ({ page, browser }) => {
+  await page.goto('./');
+  await expect(page.locator('#grid .card').first()).toBeVisible();
+  await page.fill('#name', 'Moon Frog');
+  await page.fill('#ticker', 'MFROG');
+  await page.getByRole('radio', { name: /Bonk/ }).click();
+  await page.locator('#send-it').click();
+  const link = page.getByRole('link', { name: 'Open in Phantom' });
+  await expect(link).toHaveAttribute('href', /^https:\/\/phantom\.com\/ul\/browse\//);
+  const target = decodeURIComponent((await link.getAttribute('href'))!.replace('https://phantom.com/ul/browse/', '').split('?ref=')[0]);
+  expect(target).toContain('?d=');
+  const other = await browser.newPage();
+  await other.goto(target);
+  await expect(other.locator('#name')).toHaveValue('Moon Frog');
+  await expect(other.locator('#ticker')).toHaveValue('MFROG');
+  await expect(other.getByRole('radio', { name: /Bonk/ })).toHaveAttribute('aria-checked', 'true');
+  expect(other.url()).not.toContain('?d=');
+  await other.close();
+});
+
+test('keyboard: choosing a launchpad keeps focus on it', async ({ page }) => {
+  await setup(page);
+  await page.goto('./');
+  await page.getByRole('radio', { name: /pump\.fun/ }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('radio', { name: /Jupiter/ })).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(page.getByRole('radio', { name: /Jupiter/ })).toBeFocused();
+});
+
+test('sticky SEND IT bar appears when the real button is off screen and launches', async ({ page }) => {
+  const ctx = await setup(page);
+  await page.goto('./');
+  await expect(page.locator('#grid .card').first()).toBeVisible();
+  await page.locator('#more').scrollIntoViewIfNeeded();
+  await expect(page.locator('#send-bar')).toBeVisible();
+  await page.locator('#send-bar-btn').click();
+  await expect(page.locator('#result h3')).toContainText('IS LIVE', { timeout: 90_000 });
+  expect(ctx.sims[0].err).toBeNull();
 });
 
 test('deep link pre-fills the coin for an agent', async ({ page }) => {

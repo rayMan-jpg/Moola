@@ -43,6 +43,16 @@ export function createTxBody(input: { creator: string; name: string; ticker: str
   };
 }
 
+/** crypto.randomUUID needs Safari 15.4+; fall back to getRandomValues (available everywhere we run). */
+function uuid(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 function fromBase64(b64: string): Uint8Array {
   return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 }
@@ -90,7 +100,7 @@ export const jup: Launchpad = {
 
     onStep('upload');
     const timestamp = Date.now();
-    const nonce = crypto.randomUUID();
+    const nonce = uuid();
     const message = `${timestamp}:${nonce}`;
     const signature = toBase64(await ctx.signMessage(new TextEncoder().encode(message)));
 
