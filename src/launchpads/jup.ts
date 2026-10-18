@@ -5,9 +5,9 @@
 import { VersionedTransaction } from '@solana/web3.js';
 import type { Launchpad, LaunchInput, PreparedLaunch, PrepareContext, StepId } from './types';
 import { fitImage } from '../metadata';
-import { simulateTx, simError, toBase64, waitForSignature } from '../rpc';
+import { toBase64, waitForLanding } from '../rpc';
 import { txSignature } from '../wallet';
-import { guardTx, PROGRAMS } from './guard';
+import { guardTx, preflight, PROGRAMS } from './guard';
 
 export const STUDIO_API = 'https://api.jup.ag/studio/v1';
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -74,6 +74,7 @@ export const jup: Launchpad = {
   costHint: '~0.028 SOL rent, no launch fee, 2 wallet prompts',
   signatures: 2,
   devBuy: false,
+  requires: ['signMessage', 'signTransaction'],
   overheadSol: 0.03,
   stepLabels: {
     upload: 'Prove it is your wallet (prompt 1 of 2)',
@@ -104,10 +105,9 @@ export const jup: Launchpad = {
     const mint = String(res.mint ?? '');
     const tx = VersionedTransaction.deserialize(fromBase64(String(res.transaction ?? '')));
     assertStudioTx(tx, input.creator, mint);
-    guardTx(tx, { creator: input.creator, allow: [PROGRAMS.dbc, PROGRAMS.jupStudio] });
-    const sim = await simulateTx(tx.serialize()).catch(() => null);
-    const err = sim && simError(sim);
-    if (err) throw err;
+    guardTx(tx, { creator: input.creator, mint, allow: [PROGRAMS.dbc, PROGRAMS.jupStudio] });
+    await preflight(tx, { creator: input.creator, maxSpendSol: 0.035 });
+    const blockhash = tx.message.recentBlockhash;
 
     return {
       mint,
@@ -126,8 +126,10 @@ export const jup: Launchpad = {
         } catch (e) {
           // Jupiter's submit errors are opaque; the tx may still have landed. Never let the user
           // relaunch (new mint = second coin) without checking the chain first.
-          const st = await waitForSignature(sig, { timeoutMs: 25_000 }).catch(() => ({ status: 'timeout' as const }));
-          if (st.status !== 'confirmed') throw e;
+          const st = await waitForLanding(sig, blockhash, { timeoutMs: 60_000 });
+          if (st.status === 'confirmed') return sig;
+          if (st.status === 'unknown') throw new Error(`Jupiter didn't confirm and the chain hasn't answered yet. check https://solscan.io/tx/${sig} before launching again.`);
+          throw e;
         }
         return sig;
       },

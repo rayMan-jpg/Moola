@@ -26,6 +26,24 @@ export async function fitImage(blob: Blob, maxBytes = TURBO_MAX_PAYLOAD, allowGi
   throw new Error('could not shrink that image enough. try a simpler one.');
 }
 
+/**
+ * Re-encode a user-picked image through a canvas so EXIF/GPS and other metadata never get published.
+ * GIFs pass through untouched (no EXIF, and re-encoding would kill the animation).
+ */
+export async function stripImageMetadata(file: Blob, maxSide = 1024): Promise<Blob> {
+  if (file.type === 'image/gif') return file;
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bmp.width * scale));
+  canvas.height = Math.max(1, Math.round(bmp.height * scale));
+  canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  const type = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+  const out = await new Promise<Blob | null>((r) => canvas.toBlob(r, type, 0.92));
+  if (!out) throw new Error('could not read that image');
+  return out;
+}
+
 export interface MetadataOptions {
   /** Launchpad site, written into the metadata the way that launchpad's own UI does. */
   createdOn: string;
@@ -48,6 +66,23 @@ export function metadataJson(input: LaunchInput, image: string, opts: MetadataOp
   return json;
 }
 
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource));
+  return Array.from(d, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Uploads are permanent; a retry after a rejected or expired signature reuses them instead of re-pinning.
+const uploaded = new Map<string, string>();
+
+async function uploadOnce(bytes: Uint8Array, type: string, fetchImpl: typeof fetch): Promise<string> {
+  const k = `${type}:${await sha256Hex(bytes)}`;
+  const hit = uploaded.get(k);
+  if (hit) return hit;
+  const uri = await turboUpload(bytes, type, fetchImpl);
+  uploaded.set(k, uri);
+  return uri;
+}
+
 /** Uploads image then metadata. Returns the metadata URI that goes on-chain. */
 export async function uploadMetadata(
   input: LaunchInput,
@@ -55,8 +90,8 @@ export async function uploadMetadata(
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ uri: string; image: string }> {
   const img = await fitImage(input.image);
-  const image = await turboUpload(img.bytes, img.type, fetchImpl);
+  const image = await uploadOnce(img.bytes, img.type, fetchImpl);
   const body = new TextEncoder().encode(JSON.stringify(metadataJson(input, image, opts)));
-  const uri = await turboUpload(body, 'application/json', fetchImpl);
+  const uri = await uploadOnce(body, 'application/json', fetchImpl);
   return { uri, image };
 }

@@ -17,7 +17,12 @@ const LIVE_UPLOAD = process.env.E2E_LIVE_UPLOAD === '1';
 interface Ctx {
   sims: { err: unknown; logs: string[] }[];
   sent: number;
+  submits: number;
   reject: boolean;
+  /** Pretend the blockhash died (user idled in the wallet / network dropped the tx). */
+  blockhashDead: boolean;
+  /** Pretend the RPC never sees the tx land. */
+  neverLands: boolean;
 }
 
 async function nodeRpc(method: string, params: unknown[]) {
@@ -37,7 +42,7 @@ async function simulateB64(b64: string, alias?: Key) {
  * With `alias`: the wallet holds a real throwaway key and signs for real; simulations treat it as funded.
  */
 async function setup(page: Page, alias?: Key): Promise<Ctx> {
-  const ctx: Ctx = { sims: [], sent: 0, reject: false };
+  const ctx: Ctx = { sims: [], sent: 0, submits: 0, reject: false, blockhashDead: false, neverLands: false };
   await page.exposeFunction('__mockSign', async (tx: number[]) => {
     if (ctx.reject) throw new Error('User rejected the request.');
     if (!alias) return tx; // the "wallet" signs nothing: simulation runs with sigVerify=false
@@ -66,6 +71,12 @@ async function setup(page: Page, alias?: Key): Promise<Ctx> {
       const sig = bs58.encode(Buffer.from(b64, 'base64').subarray(1, 65));
       return route.fulfill({ json: { jsonrpc: '2.0', id: body.id, result: sig } });
     }
+    if (body?.method === 'isBlockhashValid' && ctx.blockhashDead) {
+      return route.fulfill({ json: { jsonrpc: '2.0', id: body.id, result: { context: { slot: 1 }, value: false } } });
+    }
+    if (body?.method === 'getSignatureStatuses' && ctx.neverLands) {
+      return route.fulfill({ json: { jsonrpc: '2.0', id: body.id, result: { context: { slot: 1 }, value: [null] } } });
+    }
     if (body?.method === 'getSignatureStatuses') {
       const ok = ctx.sims.at(-1)?.err === null;
       return route.fulfill({ json: { jsonrpc: '2.0', id: body.id, result: { context: { slot: 1 }, value: [ok ? { confirmationStatus: 'confirmed', err: null } : { confirmationStatus: 'processed', err: { sim: 'failed' } }] } } });
@@ -83,7 +94,7 @@ async function setup(page: Page, alias?: Key): Promise<Ctx> {
 
   // Jupiter broadcasts whatever is posted to /submit, so the test simulates it instead.
   await page.route('https://api.jup.ag/studio/v1/dbc-pool/submit', async (route) => {
-    ctx.sent++;
+    ctx.submits++;
     const form = route.request().postData() ?? '';
     const b64 = form.match(/name="transaction"\r\n\r\n([A-Za-z0-9+/=]+)/)?.[1] ?? '';
     const hasLogo = /name="headerImage"; filename="logo\.(jpeg|png|webp)"/.test(form);
@@ -142,12 +153,35 @@ test('Jupiter Studio: auth prompt + tx prompt, submitted tx simulates OK', async
   await expect(page.locator('#summary')).toContainText('2 wallet prompts');
   await page.locator('#send-it').click();
   await expect(page.locator('#result h3')).toHaveText('$PLANNER IS LIVE', { timeout: 90_000 });
-  expect(ctx.sent).toBe(1);
+  expect(ctx.submits).toBe(1);
   expect(ctx.sims[0].err, ctx.sims[0].logs.slice(-6).join('\n')).toBeNull();
   const mint = (await page.locator('#result .ca span').textContent())!.trim();
   expect(mint).toMatch(/jup[sx]$/);
   await expect(page.getByRole('link', { name: 'Open on Jupiter Studio' })).toHaveAttribute('href', `https://jup.ag/tokens/${mint}`);
   await expect(page.locator('#result')).toHaveAttribute('data-via', 'jup-studio');
+});
+
+test('signing too slowly (expired blockhash) sends nothing and says so', async ({ page }) => {
+  const ctx = await setup(page);
+  await memeAgent(page, 'planner');
+  // The SDK build reads a fresh blockhash from the real RPC; it "dies" right after the wallet signs.
+  ctx.blockhashDead = true;
+  await page.locator('#send-it').click();
+  await expect(page.locator('#launch-msg')).toContainText('expired while it waited in your wallet', { timeout: 60_000 });
+  expect(ctx.sent).toBe(0);
+  await expect(page.locator('#result')).toBeHidden();
+});
+
+test('a transaction that never lands is reported as not landed, never as live', async ({ page }) => {
+  const ctx = await setup(page);
+  await memeAgent(page, 'planner');
+  await page.locator('#send-it').click();
+  // Let it broadcast, then make the chain "lose" it and the blockhash expire.
+  ctx.neverLands = true;
+  await expect.poll(() => ctx.sent, { timeout: 60_000 }).toBeGreaterThan(0);
+  ctx.blockhashDead = true;
+  await expect(page.locator('#launch-msg')).toContainText("didn't land before it expired", { timeout: 60_000 });
+  await expect(page.locator('#result')).toBeHidden();
 });
 
 test('rejecting in the wallet leaves no coin and a friendly message', async ({ page }) => {

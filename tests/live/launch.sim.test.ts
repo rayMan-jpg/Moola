@@ -6,6 +6,8 @@ import { pump } from '../../src/launchpads/pump';
 import { bonk } from '../../src/launchpads/bonk';
 import { buildCreateTx } from '../../src/launchpads/pumpportal';
 import { buildPumpSdkTx } from '../../src/launchpads/pumpSdk';
+import { guardTx, checkEffects, PROGRAMS } from '../../src/launchpads/guard';
+import { pumpMaxSpend } from '../../src/launchpads/pump';
 import { uploadMetadata } from '../../src/metadata';
 import { DEFAULT_RPCS } from '../../src/rpc';
 import type { LaunchInput } from '../../src/launchpads/types';
@@ -46,9 +48,11 @@ describe('pump.fun builders', () => {
       expect(r.err, (r.logs ?? []).slice(-8).join('\n')).toBeNull();
     });
     it(`PumpPortal create (dev buy ${devBuySol})`, async () => {
-      const { tx } = await buildCreateTx({ creator: payer, name: 'Moola Sim Test', symbol: 'MSIM', uri, devBuySol, pool: 'pump' }, fetch, Keypair.generate());
+      const { tx, mint } = await buildCreateTx({ creator: payer, name: 'Moola Sim Test', symbol: 'MSIM', uri, devBuySol, pool: 'pump' }, fetch, Keypair.generate());
+      expect(() => guardTx(tx, { creator: payer, mint: mint.publicKey.toBase58(), allow: [PROGRAMS.pump, PROGRAMS.ata, PROGRAMS.pumpPortalProxy] })).not.toThrow();
       const r = await sim(tx);
       expect(r.err, (r.logs ?? []).slice(-8).join('\n')).toBeNull();
+      expect(checkEffects(r, tx, { creator: payer, maxSpendSol: pumpMaxSpend(devBuySol) })).toBeNull();
     });
   }
 

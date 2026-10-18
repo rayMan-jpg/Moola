@@ -6,6 +6,8 @@
     <title>MOOLA — turn any AI agent into a coin</title>
     <meta name="description" content="Degen fork of ECC. Pick one of 71 agents or 311 skills, we meme it, you launch it on pump.fun, Jupiter Studio or Bonk.fun straight from your wallet." />
     <meta name="theme-color" content="#0a0a0a" />
+    <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta property="og:title" content="MOOLA — 1 click = 1 coin" />
     <meta property="og:description" content="Turn any AI agent into a Solana coin. Launch on pump.fun, Jupiter Studio or Bonk.fun straight from your wallet." />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%23ffe600' stroke='%230a0a0a' stroke-width='8'/><text x='50' y='68' font-size='54' text-anchor='middle' font-family='Impact' fill='%230a0a0a'>$</text></svg>" />
@@ -34,6 +36,7 @@
         <h2 class="panel__title" id="launch-title">THE LAUNCH PAD <small>3 fields, 1 signature</small></h2>
 
         <form id="launch-form" novalidate>
+          <fieldset id="launch-fields" class="bare">
           <div class="art">
             <div>
               <canvas id="art-canvas" width="512" height="512" role="img" aria-label="Generated coin logo"></canvas>
@@ -85,6 +88,7 @@
           <div class="summary" id="summary" aria-live="polite"></div>
 
           <button class="btn btn--huge" id="send-it" type="submit">SEND IT</button>
+          </fieldset>
           <ol class="steps" id="steps" hidden>
             <li data-step="upload">Uploading meme to IPFS</li>
             <li data-step="build">Cooking the transaction</li>

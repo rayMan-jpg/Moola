@@ -158,6 +158,7 @@ export function validateDraft(d: { name: string; ticker: string; description: st
   const errors: Validation['errors'] = {};
   const nameBytes = new TextEncoder().encode(d.name.trim()).length;
   if (!d.name.trim()) errors.name = 'needs a name ser';
+  else if ([...d.name.trim()].length < 2) errors.name = 'at least 2 characters';
   else if (nameBytes > NAME_MAX) errors.name = `max ${NAME_MAX} bytes (emoji count double)`;
   if (!d.ticker.trim()) errors.ticker = 'no ticker = no coin';
   else if (!/^[A-Z0-9]{1,10}$/.test(d.ticker)) errors.ticker = 'A-Z / 0-9 only, max 10';

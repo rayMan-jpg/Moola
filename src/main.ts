@@ -5,11 +5,12 @@ import type { Wallet } from '@wallet-standard/base';
 import { VersionedTransaction } from '@solana/web3.js';
 import { coinify, validateDraft, sanitizeTicker, emojiFor, NAME_MAX, DESC_MAX, type CatalogItem } from './coinify';
 import { drawCoinArt, canvasToBlob } from './coinArt';
-import { listWallets, onWalletsChanged, connect, disconnect, signAndSend, signOnly, canSignOnly, canSignMessage, signMessage, txSignature, isMobile, walletDeeplinks, shortAddr, type Connected } from './wallet';
-import { getBalanceSol, sendRaw, waitForSignature, setCustomRpc, rpcUrls } from './rpc';
+import { listWallets, onWalletsChanged, onAccountsChanged, connect, disconnect, signAndSend, signOnly, canSignOnly, canSignMessage, signMessage, txSignature, isMobile, walletDeeplinks, shortAddr, type Connected } from './wallet';
+import { getBalanceSol, sendRaw, waitForLanding, isBlockhashValid, RpcError, setCustomRpc, rpcUrls } from './rpc';
 import { LAUNCHPADS, padById } from './launchpads';
 import type { StepId } from './launchpads/types';
 import { friendlyError } from './errors';
+import { stripImageMetadata } from './metadata';
 
 // ── catalog types (shape produced by scripts/build-catalog.mjs) ──
 interface RawItem { k: 'agent' | 'skill' | 'command'; id: string; n: string; d: string; b: string; m?: string; t?: string[]; g?: string; c?: string; lic?: string; src?: string }
@@ -125,13 +126,20 @@ async function currentImage(): Promise<Blob> {
   return canvasToBlob(els.canvas, 'image/jpeg');
 }
 
-$('image-input').addEventListener('change', (e) => {
+$('image-input').addEventListener('change', async (e) => {
   const f = (e.target as HTMLInputElement).files?.[0];
   if (!f) return;
   if (!/^image\/(png|jpe?g|gif|webp)$/.test(f.type)) return toast('png, jpg, gif or webp only ser');
   if (f.size > IMAGE_MAX) return toast('max 4 MB, this is not a museum');
-  state.upload = f;
-  els.uploadImg.src = URL.createObjectURL(f);
+  let clean: Blob;
+  try {
+    clean = await stripImageMetadata(f); // drops EXIF/GPS before anything gets published
+  } catch {
+    return toast("couldn't read that image, try another");
+  }
+  state.upload = clean;
+  if (els.uploadImg.src.startsWith('blob:')) URL.revokeObjectURL(els.uploadImg.src);
+  els.uploadImg.src = URL.createObjectURL(clean);
   els.uploadImg.hidden = false;
   els.canvas.hidden = true;
   $('art-hint').textContent = `${f.name} locked in. reroll to go back to the auto meme.`;
@@ -149,6 +157,7 @@ $('reroll').addEventListener('click', () => {
 
 // ── form ──
 function fillFromItem(item: CatalogItem, reroll = 0, scroll = true) {
+  if (state.busy) return toast('hold up, a launch is in progress');
   state.item = item;
   state.reroll = reroll;
   const c = coinify(item, reroll);
@@ -313,9 +322,24 @@ function showWalletPicker() {
 
 const LAST_WALLET = 'moola.wallet';
 
+let stopAccountWatch = () => {};
+
 async function doConnect(w: Wallet, silent = false): Promise<Connected> {
   const c = await connect(w, silent);
   state.wallet = c;
+  stopAccountWatch();
+  stopAccountWatch = onAccountsChanged(c, (accounts) => {
+    if (!state.wallet || state.wallet.wallet !== w) return;
+    const solana = accounts.filter((a) => a.chains.some((ch) => ch.startsWith('solana:')));
+    if (!solana.length) {
+      state.wallet = null;
+      toast('wallet disconnected');
+    } else if (!solana.some((a) => a.address === state.wallet!.address)) {
+      state.wallet = { wallet: w, account: solana[0], address: solana[0].address };
+      toast(`switched to ${shortAddr(solana[0].address)}`);
+    }
+    renderWallet();
+  });
   try {
     localStorage.setItem(LAST_WALLET, w.name);
   } catch {
@@ -347,6 +371,7 @@ function renderWallet() {
 els.walletBtn.addEventListener('click', async () => {
   if (state.wallet) {
     await disconnect(state.wallet);
+    stopAccountWatch();
     state.wallet = null;
     try {
       localStorage.removeItem(LAST_WALLET);
@@ -392,6 +417,11 @@ function showMsg(html: string, ok = false) {
   els.msg.innerHTML = html ? `<div class="alert${ok ? ' alert--ok' : ''}">${html}</div>` : '';
 }
 
+function lockForm(locked: boolean) {
+  state.busy = locked;
+  $<HTMLFieldSetElement>('launch-fields').disabled = locked;
+}
+
 els.form.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (state.busy) return;
@@ -406,40 +436,42 @@ els.form.addEventListener('submit', async (e) => {
     $(first)?.focus();
     return;
   }
+  // Snapshot everything now: the user can't change pad, dev buy or art halfway through a launch.
   const pad = padById(state.pad);
-  state.busy = true;
-  els.send.disabled = true;
+  const devBuySol = pad.devBuy ? state.devBuy : 0;
+  const socials = {
+    twitter: safeUrl(els.twitter.value),
+    telegram: safeUrl(els.telegram.value),
+    website: safeUrl(els.website.value),
+  };
+  lockForm(true);
   let current: StepId | null = null;
   const onStep = (s: StepId) => {
     current = s;
     setStep(s);
   };
   try {
+    const image = await currentImage();
     const wallet = await ensureWallet();
+    if (pad.requires?.includes('signTransaction') && !canSignOnly(wallet)) {
+      throw friendly(`${wallet.wallet.name} can't do ${pad.name} launches (it can't sign without sending). use Phantom, Solflare or Backpack, or pick another launchpad.`);
+    }
+    if (pad.requires?.includes('signMessage') && !canSignMessage(wallet)) {
+      throw friendly(`${pad.name} wants a signed login message and ${wallet.wallet.name} can't sign messages (Ledger?). pick another launchpad.`);
+    }
     els.steps.hidden = false;
     // Cheap pre-flight so people with an empty wallet don't upload + sign for nothing.
-    try {
-      const bal = await getBalanceSol(wallet.address);
-      const need = effectiveDevBuy() + pad.overheadSol;
-      if (bal < need) throw Object.assign(new Error(`need ~${need.toFixed(3)} SOL, wallet has ${bal.toFixed(3)} SOL. top up ser.`), { friendly: true });
-    } catch (err) {
-      if ((err as { friendly?: boolean }).friendly) throw err;
-      /* balance lookup failed: let the wallet simulation be the judge */
-    }
-    const prepared = await pad.prepare(
-      {
-        ...draft,
-        image: await currentImage(),
-        twitter: els.twitter.value.trim() || undefined,
-        telegram: els.telegram.value.trim() || undefined,
-        website: els.website.value.trim() || undefined,
-        devBuySol: effectiveDevBuy(),
-        creator: wallet.address,
-      },
-      onStep,
-      { signMessage: canSignMessage(wallet) ? (m) => signMessage(wallet, m) : undefined },
-    );
+    const bal = await getBalanceSol(wallet.address).catch(() => null);
+    const need = devBuySol + pad.overheadSol;
+    if (bal !== null && bal < need) throw friendly(`need ~${need.toFixed(3)} SOL, wallet has ${bal.toFixed(3)} SOL. top up ser.`);
+
+    const prepared = await pad.prepare({ ...draft, ...socials, image, devBuySol, creator: wallet.address }, onStep, {
+      signMessage: canSignMessage(wallet) ? (m) => signMessage(wallet, m) : undefined,
+    });
+    if (prepared.notice) showMsg(esc(prepared.notice), true);
     onStep('sign');
+    if (state.wallet?.address !== wallet.address) throw friendly('you switched wallet accounts mid-launch. nothing was sent. hit SEND IT again.');
+    const blockhash = prepared.tx.message.recentBlockhash;
     let sig: string;
     let rebroadcast: (() => Promise<unknown>) | undefined;
     if (canSignOnly(wallet)) {
@@ -449,35 +481,36 @@ els.form.addEventListener('submit', async (e) => {
       if (messageChanged(prepared.tx, signed)) {
         // Some wallets append their own instructions (e.g. guard assertions). That voids signatures made
         // before signing; we can redo ours when we hold the key, otherwise nothing is sent.
-        if (!prepared.resign) {
-          throw new Error(`${wallet.wallet.name} changed the transaction while signing, which breaks ${pad.name}'s signature. Nothing was sent. Try again or use another wallet.`);
-        }
+        if (!prepared.resign) throw friendly(`${wallet.wallet.name} changed the transaction while signing, which breaks ${pad.name}'s signature. nothing was sent. try again or use another wallet.`);
         signed = prepared.resign(signed);
       }
+      if (!(await isBlockhashValid(blockhash).catch(() => true))) {
+        throw friendly('the transaction expired while it waited in your wallet. nothing was sent. hit SEND IT again (and sign a bit faster).');
+      }
+      sig = txSignature(signed);
+      onStep('confirm');
       if (prepared.submit) {
-        onStep('confirm');
-        sig = await prepared.submit(signed);
+        await prepared.submit(signed);
       } else {
-        sig = txSignature(signed);
-        rebroadcast = () => sendRaw(signed);
         try {
-          await sendRaw(signed);
+          await sendRaw(signed, { preflight: true });
         } catch (e) {
-          // Network blips get retried by the rebroadcast loop; real rejections (bad signature, expired) surface now.
-          if (!/fetch|network|RPC 5\d\d|429/i.test(String((e as Error).message))) throw e;
+          // A definitive node answer (bad signature, expired, would fail) stops here; network blips
+          // (incl. iOS "Load failed") just fall through to the rebroadcast loop.
+          if (e instanceof RpcError && !/already been processed|AlreadyProcessed/i.test(e.message)) throw e;
         }
       }
-    } else if (prepared.submit) {
-      throw new Error(`${wallet.wallet.name} can only sign-and-send, but ${pad.name} needs to submit the signed transaction itself. Use Phantom, Solflare or Backpack.`);
+      rebroadcast = () => sendRaw(signed);
     } else {
-      sig = await signAndSend(wallet, prepared.tx, sendRaw);
+      sig = await signAndSend(wallet, prepared.tx, (b) => sendRaw(b, { preflight: true }));
+      onStep('confirm');
     }
-    onStep('confirm');
-    const st = await waitForSignature(sig, { rebroadcast });
-    if (st.status === 'failed') throw new Error(`transaction failed on-chain: ${JSON.stringify(st.err)}`);
+    const st = await waitForLanding(sig, blockhash, { rebroadcast });
+    if (st.status === 'failed') throw new Error(`transaction failed on-chain, nothing was created: ${JSON.stringify(st.err)}`);
+    if (st.status === 'expired') throw friendly("the transaction didn't land before it expired (network busy). nothing was created and no SOL left your wallet except maybe a tiny fee. hit SEND IT again.");
     setStep(null);
-    els.steps.querySelectorAll('li').forEach((li) => ((li as HTMLElement).dataset.state = 'done'));
-    showResult({ mint: prepared.mint, sig, coinUrl: prepared.coinUrl, ticker: draft.ticker, pad: pad.name, pending: st.status === 'timeout', via: prepared.via });
+    els.steps.querySelectorAll('li').forEach((li) => ((li as HTMLElement).dataset.state = st.status === 'confirmed' ? 'done' : ''));
+    showResult({ mint: prepared.mint, sig, coinUrl: prepared.coinUrl, ticker: draft.ticker, pad: pad.name, confirmed: st.status === 'confirmed', via: prepared.via });
     refreshBalance();
   } catch (err) {
     if ((err as Error).message === 'cancelled') {
@@ -487,10 +520,25 @@ els.form.addEventListener('submit', async (e) => {
       showMsg(esc(friendlyError(err)));
     }
   } finally {
-    state.busy = false;
-    els.send.disabled = false;
+    lockForm(false);
   }
 });
+
+function friendly(message: string): Error {
+  return Object.assign(new Error(message), { friendly: true });
+}
+
+/** Socials end up in public metadata and in links; only plain https URLs are kept. */
+export function safeUrl(v: string): string | undefined {
+  const t = v.trim();
+  if (!t) return undefined;
+  try {
+    const u = new URL(/^[a-z]+:/i.test(t) ? t : `https://${t}`);
+    return u.protocol === 'https:' ? u.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function messageChanged(original: VersionedTransaction, signed: Uint8Array): boolean {
   const a = original.message.serialize();
@@ -498,7 +546,7 @@ function messageChanged(original: VersionedTransaction, signed: Uint8Array): boo
   return a.length !== b.length || a.some((x, i) => x !== b[i]);
 }
 
-function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: string; pad: string; pending: boolean; via?: string }) {
+function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: string; pad: string; confirmed: boolean; via?: string }) {
   try {
     localStorage.setItem('moola.last', JSON.stringify({ ...r, at: Date.now() }));
   } catch {
@@ -509,8 +557,8 @@ function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: str
   els.result.hidden = false;
   els.result.dataset.via = r.via ?? '';
   els.result.innerHTML = `
-    <h3>$${esc(r.ticker)} IS LIVE</h3>
-    <p>${r.pending ? 'sent! the chain is slow, it will show up in a few seconds.' : 'confirmed on Solana. you are now a dev. act like it.'}</p>
+    <h3>$${esc(r.ticker)} ${r.confirmed ? 'IS LIVE' : 'IS SENT'}</h3>
+    <p>${r.confirmed ? 'confirmed on Solana. you are now a dev. act like it.' : "sent, but the RPC hasn't confirmed it yet. check the tx link before launching again, it may still land."}</p>
     <div class="ca"><span>${esc(r.mint)}</span><button class="btn btn--small btn--yellow" type="button" data-copy="${esc(r.mint)}">Copy CA</button></div>
     <div class="result__links">
       <a class="btn" href="${esc(r.coinUrl)}" target="_blank" rel="noopener">Open on ${esc(r.pad)}</a>
@@ -519,7 +567,7 @@ function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: str
       <a class="btn btn--ghost" href="https://dexscreener.com/solana/${esc(r.mint)}" target="_blank" rel="noopener">Dexscreener</a>
     </div>
     <p style="margin-top:16px"><button class="btn btn--yellow" type="button" id="again">Launch another</button></p>`;
-  confetti();
+  if (r.confirmed) confetti();
   els.result.querySelector<HTMLElement>('[data-copy]')?.addEventListener('click', (e) => {
     navigator.clipboard?.writeText((e.currentTarget as HTMLElement).dataset.copy!).then(() => toast('CA copied'), () => toast('copy failed, select it manually'));
   });
@@ -683,7 +731,8 @@ window.addEventListener('hashchange', routeFromHash);
 $('rpc-btn').addEventListener('click', () => {
   openModal(
     'RPC SETTINGS',
-    `<p>Public RPCs get rate limited when everyone is aping. Paste your own (Helius, QuickNode, Triton...) to make balance checks and confirmations snappy. Your wallet broadcasts the launch itself either way.</p>
+    `<p>Public RPCs get rate limited when everyone is aping. Paste your own (Helius, QuickNode, Triton...) to make building, checks and confirmations snappy.</p>
+     <p class="art__hint">Saved in this browser only. If the URL contains an API key, use a key restricted to this site's origin.</p>
      <label class="field"><span class="field__label">Custom RPC URL</span><input class="input" id="rpc-input" type="url" placeholder="https://..." value="${esc(rpcUrls().length > 2 ? rpcUrls()[0] : '')}" /></label>
      <button class="btn" type="button" id="rpc-save">Save</button>`,
   );
@@ -697,7 +746,20 @@ $('rpc-btn').addEventListener('click', () => {
 });
 
 // ── boot ──
+/** GitHub Pages can't send frame-ancestors, so refuse to run framed (clickjacking a wallet prompt). */
+function framed(): boolean {
+  try {
+    return window.top !== window.self;
+  } catch {
+    return true;
+  }
+}
+
 async function boot() {
+  if (framed()) {
+    document.body.innerHTML = `<main class="hero"><h1>NOPE</h1><p>MOOLA doesn't run inside other sites. <a href="${esc(location.href)}" target="_blank" rel="noopener">Open MOOLA directly</a>.</p></main>`;
+    return;
+  }
   renderPadNames();
   renderPads();
   renderBuys();

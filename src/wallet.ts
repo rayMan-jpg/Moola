@@ -50,6 +50,18 @@ export async function connect(wallet: Wallet, silent = false): Promise<Connected
   return { wallet, account, address: account.address };
 }
 
+const EVENTS = 'standard:events';
+
+/** Notifies when the wallet's authorized accounts change (account switch, site disconnected). */
+export function onAccountsChanged(c: Connected, cb: (accounts: readonly WalletAccount[]) => void): () => void {
+  type On = (event: 'change', listener: (p: { accounts?: readonly WalletAccount[] }) => void) => () => void;
+  const feature = (c.wallet.features as Feature<{ on?: On }>)[EVENTS];
+  if (!feature?.on) return () => {};
+  return feature.on('change', (p) => {
+    if (p.accounts) cb(p.accounts);
+  });
+}
+
 export async function disconnect(c: Connected | null): Promise<void> {
   if (!c) return;
   const feature = (c.wallet.features as Feature<{ disconnect?: () => Promise<void> }>)[DISCONNECT];

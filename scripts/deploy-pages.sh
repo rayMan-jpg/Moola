@@ -3,6 +3,8 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+# Build only from the lockfile, never from whatever happens to be in node_modules.
+npm ci --ignore-scripts --no-audit --no-fund
 npm run build
 SHA="$(git rev-parse --short HEAD)"
 TMP="$(mktemp -d)"

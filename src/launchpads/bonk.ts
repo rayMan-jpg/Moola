@@ -5,8 +5,7 @@ import { VersionedTransaction } from '@solana/web3.js';
 import type { Launchpad, LaunchInput, PreparedLaunch, PrepareContext, StepId } from './types';
 import { uploadMetadata } from '../metadata';
 import { assertTx } from './pumpportal';
-import { simulateTx, simError } from '../rpc';
-import { guardTx, PROGRAMS } from './guard';
+import { guardTx, preflight, PROGRAMS } from './guard';
 
 export const BONK_CREATE_URL = 'https://launch.letsbonk.fun/launchpad/createMint';
 export const LAUNCHLAB_PROGRAM = 'LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj';
@@ -70,12 +69,11 @@ export const bonk: Launchpad = {
     if (!tx.signatures[mintIdx]?.some((b) => b !== 0)) throw new Error('bonk.fun builder did not sign the mint. Aborting.');
     guardTx(tx, {
       creator: input.creator,
+      mint: j.mint,
       allow: [PROGRAMS.launchLab, PROGRAMS.ata, PROGRAMS.system, PROGRAMS.token],
       wrapLamports: Math.floor(input.devBuySol * 1e9),
     });
-    const sim = await simulateTx(tx.serialize()).catch(() => null); // RPC hiccup: the wallet still simulates
-    const err = sim && simError(sim);
-    if (err) throw err;
+    await preflight(tx, { creator: input.creator, maxSpendSol: input.devBuySol * 1.05 + 0.03 });
     return { mint: j.mint, tx, coinUrl: `https://bonk.fun/token/${j.mint}`, via: 'bonk-api' };
   },
 };

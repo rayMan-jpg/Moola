@@ -23,6 +23,8 @@ export interface PreparedLaunch {
   coinUrl: string;
   /** Which builder produced the transaction (for diagnostics). */
   via?: string;
+  /** Shown to the user before the signature prompt (e.g. a fallback builder's fee). */
+  notice?: string;
   /**
    * Re-apply our own extra signatures to a wallet-signed transaction. Only possible when we hold
    * those keys (pump.fun's fresh mint), and lets the launch survive a wallet that edits the message.
@@ -49,6 +51,8 @@ export interface Launchpad {
   signatures: 1 | 2;
   /** Whether a creator buy can ride along in the launch transaction. */
   devBuy: boolean;
+  /** Wallet capabilities needed beyond connect + sign (checked before any prompt). */
+  requires?: ('signMessage' | 'signTransaction')[];
   /** Overrides for the progress step labels. */
   stepLabels?: Partial<Record<StepId, string>>;
   /** Short human hint about what the launch costs on top of the dev buy. */

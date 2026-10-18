@@ -2,8 +2,8 @@ import type { Launchpad, LaunchInput, PreparedLaunch, PrepareContext, StepId } f
 import { VersionedTransaction, type Keypair } from '@solana/web3.js';
 import { uploadMetadata } from '../metadata';
 import { buildCreateTx, assertTx } from './pumpportal';
-import { rpcUrls, simulateTx, simError } from '../rpc';
-import { guardTx, PROGRAMS } from './guard';
+import { rpcUrls } from '../rpc';
+import { guardTx, preflight, PROGRAMS, GuardError } from './guard';
 
 type Built = { tx: VersionedTransaction; mint: Keypair; via: string };
 
@@ -16,17 +16,17 @@ export function resignWith(mint: Keypair): (signed: Uint8Array) => Uint8Array {
   };
 }
 
-/** Simulate before the wallet popup; returns null if OK, the error otherwise. */
-async function check(b: Built, creator: string): Promise<Error | null> {
-  assertTx(b.tx, creator, b.mint.publicKey.toBase58());
+/** Most SOL a pump.fun launch may cost: dev buy (+ fees) plus rent for mint, curve and token accounts. */
+export const pumpMaxSpend = (devBuySol: number) => devBuySol * 1.05 + 0.015;
+
+/** Shape check, then simulate; throws GuardError (tampering), funds errors, or a simulation failure. */
+async function check(b: Built, creator: string, devBuySol: number): Promise<void> {
+  const mint = b.mint.publicKey.toBase58();
+  assertTx(b.tx, creator, mint);
   const allow: string[] = [PROGRAMS.pump, PROGRAMS.ata];
   if (b.via === 'pumpportal') allow.push(PROGRAMS.pumpPortalProxy);
-  guardTx(b.tx, { creator, allow });
-  try {
-    return simError(await simulateTx(b.tx.serialize()));
-  } catch {
-    return null; // RPC hiccup: the wallet's own simulation still guards the user
-  }
+  guardTx(b.tx, { creator, mint, allow });
+  await preflight(b.tx, { creator, maxSpendSol: pumpMaxSpend(devBuySol) });
 }
 
 export const pump: Launchpad = {
@@ -49,7 +49,15 @@ export const pump: Launchpad = {
       // 1) official SDK, built locally (no third party besides the RPC)
       async () => {
         const { buildPumpSdkTx } = await import('./pumpSdk');
-        return { ...(await buildPumpSdkTx({ ...base, rpcUrl: rpcUrls()[0] })), via: 'pump-sdk' };
+        let lastErr: unknown;
+        for (const rpcUrl of rpcUrls()) {
+          try {
+            return { ...(await buildPumpSdkTx({ ...base, rpcUrl })), via: 'pump-sdk' };
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+        throw lastErr;
       },
       // 2) PumpPortal's builder (0.5% fee on the dev buy only)
       async () => ({ ...(await buildCreateTx({ ...base, pool: 'pump' }, fetchImpl)), via: 'pumpportal' }),
@@ -63,17 +71,19 @@ export const pump: Launchpad = {
         lastErr = e as Error;
         continue;
       }
-      let err: Error | null;
+      let err: Error | null = null;
       try {
-        err = await check(built, input.creator);
+        await check(built, input.creator, input.devBuySol);
       } catch (e) {
-        err = e as Error; // guard rejection: try the next builder
+        err = e as Error;
       }
       if (!err) {
         const mint = built.mint.publicKey.toBase58();
-        return { mint, tx: built.tx, coinUrl: `https://pump.fun/coin/${mint}`, via: built.via, resign: resignWith(built.mint) };
+        const notice = built.via === 'pumpportal' && input.devBuySol > 0 ? "pump.fun's own builder hiccuped, so this launch goes through PumpPortal, which adds a 0.5% fee on the dev buy." : undefined;
+        return { mint, tx: built.tx, coinUrl: `https://pump.fun/coin/${mint}`, via: built.via, notice, resign: resignWith(built.mint) };
       }
-      if ((err as { funds?: boolean }).funds) throw err; // no builder can fix an empty wallet
+      // Tampering is a stop sign, not a reason to try a less trusted builder; and no builder fixes an empty wallet.
+      if (err instanceof GuardError || (err as { funds?: boolean }).funds) throw err;
       lastErr = err;
     }
     throw lastErr ?? new Error('could not build the pump.fun transaction');

@@ -15,19 +15,19 @@
     "test:e2e": "NODE_USE_ENV_PROXY=1 playwright test"
   },
   "dependencies": {
-    "@fontsource/bangers": "^5.3.0",
-    "@fontsource/comic-neue": "^5.3.0",
-    "@fontsource/vt323": "^5.3.0",
-    "@noble/curves": "^2.4.0",
+    "@fontsource/bangers": "5.3.0",
+    "@fontsource/comic-neue": "5.3.0",
+    "@fontsource/vt323": "5.3.0",
+    "@noble/curves": "2.4.0",
     "@pump-fun/pump-sdk": "4.1.0",
-    "@solana/spl-token": "^0.4.15",
-    "@solana/wallet-standard-features": "^1.5.0",
-    "@solana/web3.js": "^1.99.0",
-    "@wallet-standard/app": "^1.1.1",
-    "@wallet-standard/base": "^1.1.1",
-    "bn.js": "^5.2.5",
-    "bs58": "^6.0.0",
-    "buffer": "^6.0.3"
+    "@solana/spl-token": "0.4.15",
+    "@solana/wallet-standard-features": "1.5.0",
+    "@solana/web3.js": "1.99.0",
+    "@wallet-standard/app": "1.1.1",
+    "@wallet-standard/base": "1.1.1",
+    "bn.js": "5.2.5",
+    "bs58": "6.0.0",
+    "buffer": "6.0.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
