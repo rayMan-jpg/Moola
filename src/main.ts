@@ -34,6 +34,8 @@ const state = {
   devBuy: 0,
   wallet: null as Connected | null,
   busy: false,
+  /** User typed into the form; never overwrite their input with an automatic fill. */
+  dirty: false,
 };
 
 const els = {
@@ -172,6 +174,10 @@ function updateCounts() {
 function clearErrors() {
   for (const k of ['name', 'ticker', 'description']) $(`${k}-err`).textContent = '';
 }
+
+els.form.addEventListener('input', (e) => {
+  if ((e as InputEvent).isTrusted) state.dirty = true;
+});
 
 els.name.addEventListener('input', () => {
   updateCounts();
@@ -593,6 +599,11 @@ $('grid').addEventListener('click', (e) => {
   }
 });
 
+function renderPadNames() {
+  const names = LAUNCHPADS.map((p) => p.name);
+  $('pad-names').textContent = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : names[0];
+}
+
 function renderStatsAndMarquee() {
   const c = state.catalog!;
   $('stats').innerHTML = [
@@ -647,6 +658,7 @@ $('rpc-btn').addEventListener('click', () => {
 
 // ── boot ──
 async function boot() {
+  renderPadNames();
   renderPads();
   renderBuys();
   renderTabs();
@@ -665,7 +677,7 @@ async function boot() {
   if (!routeFromHash()) {
     renderGrid();
     const first = items('agent').find((i) => i.id === 'code-reviewer') ?? items('agent')[0];
-    if (first) fillFromItem(first, 0, false);
+    if (first && !state.dirty) fillFromItem(first, 0, false);
   }
   // Silent reconnect, only to the wallet this browser used last (never pops a prompt on load).
   let last = '';

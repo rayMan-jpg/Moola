@@ -140,7 +140,7 @@ img, canvas { max-width: 100%; display: block; }
   box-shadow: 6px 6px 0 var(--green);
   animation: pulse 1.6s ease-in-out infinite;
 }
-.btn--huge:hover { animation: shake 0.35s linear infinite; box-shadow: 8px 8px 0 var(--green); }
+.btn--huge:hover { animation: shake 0.3s linear 2; box-shadow: 8px 8px 0 var(--green); }
 .btn--huge[disabled] { animation: none; }
 @keyframes pulse { 50% { box-shadow: 6px 6px 0 var(--yellow); } }
 @keyframes shake { 25% { transform: translate(-2px, 1px) rotate(-1deg); } 75% { transform: translate(2px, -1px) rotate(1deg); } }

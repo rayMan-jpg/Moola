@@ -106,7 +106,9 @@ test('rejecting in the wallet leaves no coin and a friendly message', async ({ p
 test('form validation blocks a bad ticker before anything happens', async ({ page }) => {
   const ctx = await setup(page);
   await page.goto('./');
-  await page.fill('#name', '');
+  await page.fill('#name', ''); // before the catalog lands: must not be overwritten by the default coin
+  await expect(page.locator('#grid .card').first()).toBeVisible();
+  await expect(page.locator('#name')).toHaveValue('');
   await page.locator('#send-it').click();
   await expect(page.locator('#name-err')).toContainText('needs a name');
   expect(ctx.sent).toBe(0);
