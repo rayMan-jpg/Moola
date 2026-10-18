@@ -20,6 +20,8 @@ ENGINE_REPO = "https://github.com/rayman-jpg/Moola"
 ENGINE_BRANCH = "claude/moola-degen-launcher"
 SOLANA_RPC = "https://solana-rpc.publicnode.com,https://api.mainnet-beta.solana.com"
 MARGIN_PCT = "0"
+RH_CHAIN_ID = "4663"
+RH_RPC = "https://rpc.mainnet.chain.robinhood.com,https://robinhood-rpc.publicnode.com,https://robinhood.drpc.org"
 
 [observability]
 enabled = true

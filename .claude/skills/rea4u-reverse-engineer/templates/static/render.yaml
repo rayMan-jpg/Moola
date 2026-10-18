@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: PROJECT_SLUG
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    autoDeployTrigger: "off"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

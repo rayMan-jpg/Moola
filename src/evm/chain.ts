@@ -56,7 +56,9 @@ export async function evmRpc<T>(method: string, params: unknown[] = [], urls = R
         signal: AbortSignal.timeout(10_000),
       });
       if (!r.ok) throw new Error(`${method}: HTTP ${r.status}`);
-      const j = (await r.json()) as { result?: T; error?: { message?: string; data?: unknown } };
+      const j = (await r.json()) as { result?: T; error?: { code?: number; message?: string; data?: unknown } };
+      // rate limits (official RPC: 429, publicnode: -32005, others: -32029) fail over to the next RPC
+      if (j.error && [429, -32005, -32029].includes(j.error.code ?? 0)) throw new Error(`${method}: rate limited`);
       if (j.error) throw new EvmRpcError(j.error.message ?? 'rpc error', j.error.data);
       return j.result as T;
     } catch (e) {

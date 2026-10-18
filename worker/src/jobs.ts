@@ -38,7 +38,7 @@ const LEASE_MS = 60_000;
 const FEED_MAX = 25;
 const SPEC_MAX = 200_000;
 
-const PADS: PadId[] = ['pump', 'jup', 'bonk', 'pons', 'stonk'];
+const PADS: PadId[] = ['pump', 'jup', 'bonk', 'pons', 'stonk', 'utoken'];
 const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} .'!&$-]{1,31}$/u;
 const TICKER_RE = /^[A-Z0-9]{2,10}$/;
 
@@ -61,6 +61,13 @@ export async function checkPayment(env: Env, q: Quote, tx: string, f: typeof fet
   const rpcs = rpcList(env.RH_RPC, []);
   if (!rpcs.length) throw new HttpError(503, 'robinhood chain RPC not configured');
   return verifyEvmPayment(tx, q, rpcs, f);
+}
+
+/** What a payment buys in session budget: the amount minus a reserve for the cap's overshoot. */
+export function sessionBudget(env: Env, usdCents: number): number {
+  const pct = Math.min(50, Math.max(0, Number(env.RESERVE_PCT ?? 6) || 0));
+  const reserve = Math.max(50, Math.round((usdCents * pct) / 100));
+  return Math.max(100, usdCents - reserve);
 }
 
 function payKey(q: Quote, tx: string) {
@@ -112,9 +119,9 @@ export async function createJob(req: JobRequest, d: Deps): Promise<JobView> {
     project: { name: projectName },
     token: { name: tokenName, ticker, pad: token.pad, status: 'pending' },
     needs: checkNeeds(req.needs),
-    budgetCents: q.usdCents,
+    budgetCents: sessionBudget(env, q.usdCents),
     spentCents: 0,
-    feed: [{ at: new Date(now).toISOString(), text: `payment confirmed. budget ${(q.usdCents / 100).toFixed(2)} USD` }],
+    feed: [{ at: new Date(now).toISOString(), text: `payment confirmed. engine budget ${(sessionBudget(env, q.usdCents) / 100).toFixed(2)} USD` }],
     attempts: 0,
     payments: [key],
   };
@@ -386,7 +393,7 @@ export async function topupJob(id: string, body: { quote: Quote; payTx: string }
     // The new cap must sit above what's already been spent (which can overshoot the old cap
     // by one model request), so add the top-up to whichever is higher.
     const base = Math.max(fresh.budgetCents, s.spentCents);
-    fresh.budgetCents = base + q.usdCents;
+    fresh.budgetCents = base + sessionBudget(env, q.usdCents);
     await d.engine.setBudget(fresh.sessionId!, fresh.budgetCents);
     fresh.payments.push(key);
     fresh.status = 'running';
@@ -406,7 +413,7 @@ const SOL_ADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const EVM_ADDR = /^0x[0-9a-fA-F]{40}$/;
 
 /** POST /api/jobs/:id/token: records the launched token (shown on the project page). */
-export async function recordToken(id: string, body: { mint?: string; tx?: string; url?: string; failed?: boolean }, d: Deps): Promise<JobView> {
+export async function recordToken(id: string, body: { mint?: string; tx?: string; url?: string; armTx?: string; failed?: boolean }, d: Deps): Promise<JobView> {
   const job = await d.store.getJob(id);
   if (!job) throw new HttpError(404, 'no such job');
   if (job.token.status === 'live') return view(job);
@@ -418,14 +425,17 @@ export async function recordToken(id: string, body: { mint?: string; tx?: string
     if (!ok) throw new HttpError(400, 'bad token address');
     const proof = await tokenLaunchedBy(d, job, mint, String(body?.tx ?? ''));
     if (!proof) throw new HttpError(400, "couldn't confirm that launch on-chain yet");
-    job.token = { ...job.token, status: 'live', mint, tx: String(body.tx), url: safeLaunchUrl(job.token.pad, mint) };
+    // A StonkLauncher token only trades once its supply is armed: require that tx too.
+    if (job.token.pad === 'stonk' && !(await stonkArmed(d, job, String(body?.armTx ?? '')))) throw new HttpError(400, "couldn't confirm the launch was armed yet");
+    job.token = { ...job.token, status: 'live', mint, tx: String(body.tx), url: safeLaunchUrl(job.token.pad, mint, body.url) };
     push(job, `$${job.token.ticker} is live`);
   }
   await d.store.putJob(job);
   return view(job);
 }
 
-export function safeLaunchUrl(pad: PadId, mint: string): string {
+/** Coin page links are built here (or strictly pattern-checked), never taken from the client as-is. */
+export function safeLaunchUrl(pad: PadId, mint: string, claimed?: string): string {
   switch (pad) {
     case 'pump':
       return `https://pump.fun/coin/${mint}`;
@@ -435,8 +445,13 @@ export function safeLaunchUrl(pad: PadId, mint: string): string {
       return `https://bonk.fun/token/${mint}`;
     case 'pons':
       return `https://ponsfamily.com/launchpad/${mint.toLowerCase()}`;
+    case 'utoken':
+      return `https://utoken.gg/token/${mint.toLowerCase()}`;
     case 'stonk':
-      return `https://stonk.broker/token/${mint}`;
+      // StonkBrokers keys coin pages by launch id, which only the creation receipt knows.
+      return claimed && /^https:\/\/stonkbrokers\.io\/safe-launch\/token\/weth2-[a-z0-9]{1,24}-\d{1,9}$/.test(claimed)
+        ? claimed
+        : `https://robinhoodchain.blockscout.com/token/${mint.toLowerCase()}`;
   }
 }
 
@@ -452,7 +467,7 @@ async function tokenLaunchedBy(d: Deps, job: JobRecord, mint: string, tx: string
           jsonrpc: '2.0',
           id: 1,
           method: 'getTransaction',
-          params: [tx, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0 }],
+          params: [tx, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 1 }],
         }),
       });
       const j = (await r.json()) as {
@@ -474,6 +489,30 @@ async function tokenLaunchedBy(d: Deps, job: JobRecord, mint: string, tx: string
     const rc = (await call('eth_getTransactionReceipt', [tx])) as { status?: string; from?: string; logs?: { address?: string }[] } | null;
     if (!rc || rc.status !== '0x1' || rc.from?.toLowerCase() !== job.payer.toLowerCase()) return false;
     return (rc.logs ?? []).some((l) => l.address?.toLowerCase() === mint.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+const STONK_PAD = '0xfcd61b25bbf3abd6cf0070d6328e351cc30eec9f';
+
+async function stonkArmed(d: Deps, job: JobRecord, tx: string): Promise<boolean> {
+  const rpcs = rpcList(d.env.RH_RPC, []);
+  if (!rpcs.length || !/^0x[0-9a-fA-F]{64}$/.test(tx)) return false;
+  try {
+    const r = await d.fetch(rpcs[0], {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt', params: [tx] }),
+    });
+    const rc = ((await r.json()) as { result?: { status?: string; from?: string; to?: string; logs?: { address?: string }[] } | null }).result;
+    return (
+      !!rc &&
+      rc.status === '0x1' &&
+      rc.from?.toLowerCase() === job.payer.toLowerCase() &&
+      rc.to?.toLowerCase() === STONK_PAD &&
+      (rc.logs ?? []).some((l) => l.address?.toLowerCase() === STONK_PAD)
+    );
   } catch {
     return false;
   }

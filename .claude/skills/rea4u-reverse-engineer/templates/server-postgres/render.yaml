@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: PROJECT_SLUG
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build --if-present
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeployTrigger: "off"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: PROJECT_SLUG-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: PROJECT_SLUG-cache
+          property: connectionString
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: THIRD_PARTY_API_KEY
+        sync: false
+  - type: keyvalue
+    name: PROJECT_SLUG-cache
+    plan: free
+    ipAllowList: []
+databases:
+  - name: PROJECT_SLUG-db
+    plan: free
+    databaseName: app
+    user: app

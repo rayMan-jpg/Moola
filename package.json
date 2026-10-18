@@ -1,8 +1,8 @@
 {
-  "name": "moola",
+  "name": "rea4u",
   "private": true,
   "version": "0.1.0",
-  "description": "MOOLA — degen fork of ECC: turn any agent into a coin and launch it on Solana launchpads in one click.",
+  "description": "rea4u: reverse engineer anything. Paste a repo or site, get a rebranded working clone, a spec, ranked hosting and a token on pump.fun, Jupiter, Bonk.fun, Pons or StonkLauncher.",
   "type": "module",
   "license": "MIT",
   "scripts": {

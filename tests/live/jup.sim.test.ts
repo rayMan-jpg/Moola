@@ -24,7 +24,7 @@ describe('Jupiter Studio', () => {
     const res = await fetch(`${STUDIO_API}/dbc-pool/create-tx`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(createTxBody({ creator: kp.publicKey.toBase58(), name: 'Moola Sim Test', ticker: 'MSIM' }, 'image/jpeg', { message, signature, timestamp, nonce })),
+      body: JSON.stringify(createTxBody({ creator: kp.publicKey.toBase58(), name: 'Rea4u Sim Test', ticker: 'MSIM' }, 'image/jpeg', { message, signature, timestamp, nonce })),
     });
     const j = await res.json();
     expect(res.status, JSON.stringify(j)).toBe(200);
@@ -38,7 +38,7 @@ describe('Jupiter Studio', () => {
   it('adapter goes auth -> build and stops an unfunded wallet before the tx prompt', async () => {
     const steps: string[] = [];
     await expect(
-      jup.prepare({ name: 'Moola Sim Test', ticker: 'MSIM2', description: 'sim only', image: testImage(), devBuySol: 0, creator: kp.publicKey.toBase58() }, (s) => steps.push(s), { signMessage }),
+      jup.prepare({ name: 'Rea4u Sim Test', ticker: 'MSIM2', description: 'sim only', image: testImage(), devBuySol: 0, creator: kp.publicKey.toBase58() }, (s) => steps.push(s), { signMessage }),
     ).rejects.toThrow(/not enough SOL/);
     expect(steps).toEqual(['upload', 'build']);
   });

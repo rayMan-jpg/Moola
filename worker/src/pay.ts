@@ -60,7 +60,8 @@ export async function verifySolanaPayment(sig: string, q: Quote, rpcs: string[],
   const tx = await jsonRpc<SolTx | null>(
     rpcs,
     'getTransaction',
-    [sig, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0 }],
+    // version 1 transactions are ~16% of mainnet now; 1 also covers legacy and v0
+    [sig, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 1 }],
     f,
   );
   if (!tx) return { ok: false, pending: true, reason: 'payment not confirmed yet' };
@@ -94,7 +95,9 @@ export async function verifySolanaPayment(sig: string, q: Quote, rpcs: string[],
     const needle = `"${memo}"`;
     memoFound = (tx.meta.logMessages ?? []).some((l) => l.startsWith('Program log: Memo') && l.endsWith(needle));
   }
-  if (!memoFound) return { ok: false, pending: false, reason: "that payment isn't tagged with this quote" };
+  // Some wallets drop or rewrite memos. An untagged transfer still counts when it comes from the
+  // wallet the quote was issued to (the payments table stops it being used twice).
+  if (!memoFound && !(q.payer && payer === q.payer)) return { ok: false, pending: false, reason: "that payment isn't tagged with this quote" };
   if (paid < BigInt(q.amount)) return { ok: false, pending: false, reason: 'that payment is short of the quote' };
   return { ok: true, payer, paid, at };
 }
@@ -133,7 +136,10 @@ export async function verifyEvmPayment(hash: string, q: Quote, rpcs: string[], f
   const late = inWindow(q, at);
   if (late) return { ok: false, pending: false, reason: late };
   if (!tx.to || tx.to.toLowerCase() !== q.treasury.toLowerCase()) return { ok: false, pending: false, reason: "that payment didn't go to the rea4u treasury" };
-  if (tx.input.toLowerCase() !== utf8Hex(payMemo(q.id)).toLowerCase()) return { ok: false, pending: false, reason: "that payment isn't tagged with this quote" };
+  const tagged = tx.input.toLowerCase() === utf8Hex(payMemo(q.id)).toLowerCase();
+  // Wallets that strip calldata from a plain send: accept the empty-data transfer from the quoted payer.
+  const stripped = tx.input === '0x' && !!q.payer && tx.from.toLowerCase() === q.payer;
+  if (!tagged && !stripped) return { ok: false, pending: false, reason: "that payment isn't tagged with this quote" };
   const paid = BigInt(tx.value);
   if (paid < BigInt(q.amount)) return { ok: false, pending: false, reason: 'that payment is short of the quote' };
   return { ok: true, payer: tx.from.toLowerCase(), paid, at };

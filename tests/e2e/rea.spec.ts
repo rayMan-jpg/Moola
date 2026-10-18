@@ -22,11 +22,19 @@ const TREASURY_SOL = '4ohMhNctr8aLPkqQoSkxtQa16PvZi1LqHeVvmPvZ66Q5';
 // A rich Robinhood Chain EOA (no code) as the EVM wallet; a plain EOA as the treasury.
 const EVM_USER = '0x53091256ebd2d8aa37b45536a5fd864ca764f32f';
 const TREASURY_EVM = '0x307576dd4f73f91bb8c4a2edb762938e8e067d31';
-const TOKEN_LAUNCHED = '0x8d4aad4953d0ca700d468f3753aa14432d1b35b43ec6409f051fb6aa43a89607';
+const PONS_FACTORY = '0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e';
+const STONK_PAD = '0xfcd61b25bbf3abd6cf0070d6328e351cc30eec9f';
+const UTOKEN_FACTORY = '0xd03fb35ee057df5933a8a95b362cc3e11a56d4cf';
 
+/** JSON-RPC with retries: the public Robinhood RPC rate-limits bursts (HTTP 429 / code 429). */
 async function rpc(url: string, method: string, params: unknown[]) {
-  const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
-  return (await r.json()) as { result?: any; error?: { message: string } };
+  for (let i = 0; ; i++) {
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }).catch(() => null);
+    const j = r ? ((await r.json().catch(() => null)) as { result?: any; error?: { code?: number; message: string } } | null) : null;
+    const limited = !j || r!.status === 429 || j.error?.code === 429 || j.error?.code === -32005;
+    if (!limited || i >= 4) return j ?? { error: { message: 'rpc unreachable' } };
+    await new Promise((res) => setTimeout(res, 500 * 2 ** i));
+  }
 }
 
 interface Sent {
@@ -42,7 +50,7 @@ interface World {
   signedPerPrompt: number[];
   reject: boolean;
   sol: Sent[];
-  evm: { hash: string; tx: Record<string, string>; token?: string; curve?: string }[];
+  evm: { hash: string; tx: Record<string, string>; token?: string; logs: { address: string; topics: string[]; data: string }[] }[];
   api: { method: string; path: string; body: any }[];
   engine: FakeEngine;
   store: MemoryStore;
@@ -103,7 +111,7 @@ function workerFetch(w: World): typeof fetch {
     if (url.startsWith('https://rh.worker.test')) {
       const h = w.evm.find((x) => x.hash === body.params[0]);
       if (body.method === 'eth_getTransactionByHash') return j(h && { from: h.tx.from, to: h.tx.to, value: h.tx.value, input: h.tx.data, chainId: '0x1237', blockNumber: '0x10' });
-      if (body.method === 'eth_getTransactionReceipt') return j(h && { status: '0x1', blockNumber: '0x10', from: h.tx.from, logs: h.token ? [{ address: h.token }] : [] });
+      if (body.method === 'eth_getTransactionReceipt') return j(h && { status: '0x1', blockNumber: '0x10', from: h.tx.from, to: h.tx.to, logs: h.logs });
       if (body.method === 'eth_getBlockByNumber') return j({ timestamp: `0x${Math.floor(Date.now() / 1000).toString(16)}` });
     }
     return new Response(JSON.stringify({ message: `not mocked ${method} ${url}` }), { status: 404 });
@@ -233,14 +241,22 @@ async function setup(page: Page, opts: { evm?: boolean; sol?: boolean; alias?: K
     await page.exposeFunction('__mockEvmSend', async (tx: Record<string, string>) => {
       w.prompts++;
       if (w.reject) throw Object.assign(new Error('User rejected the request.'), { code: 4001 });
-      const call = await rpc(RH_RPC, 'eth_call', [{ from: tx.from, to: tx.to, data: tx.data, value: tx.value }, 'latest']);
-      if (call.error) throw new Error(`simulation reverted: ${call.error.message}`);
+      // Replay everything this wallet "sent" before, in one simulated block, so follow-up txs
+      // (StonkLauncher's approve + arm) see the token the earlier tx created.
+      const calls = [...w.evm.map((e) => e.tx), tx].map((t) => ({ from: t.from, to: t.to, data: t.data, value: t.value ?? '0x0' }));
+      const sim = await rpc(RH_RPC, 'eth_simulateV1', [{ blockStateCalls: [{ calls }], validation: false }, 'latest']);
+      const last = sim.result?.[0]?.calls?.at(-1) as { status: string; returnData: string; error?: unknown } | undefined;
+      if (process.env.E2E_DEBUG) console.log('EVM SIM', tx.data.slice(0, 10), JSON.stringify(last ?? sim).slice(0, 400));
+      if (!last || last.status !== '0x1') throw new Error(`simulation reverted: ${JSON.stringify(last?.error ?? sim.error)}`);
       const hash = `0x${createHash('sha256').update(JSON.stringify(tx) + w.evm.length).digest('hex')}`;
-      const rec: World['evm'][number] = { hash, tx };
-      if (call.result && call.result.length >= 130) {
-        rec.token = `0x${call.result.slice(26, 66)}`;
-        rec.curve = `0x${call.result.slice(90, 130)}`;
-      }
+      // The receipt carries the real logs the simulation produced (TokenLaunched, LaunchCreated, LaunchArmed...).
+      const logs = ((last as unknown as { logs?: { address: string; topics: string[]; data: string }[] }).logs ?? []).map((l) => ({ address: l.address, topics: l.topics, data: l.data }));
+      const rec: World['evm'][number] = { hash, tx, logs };
+      const word = (i: number) => last.returnData.slice(2 + 64 * i, 2 + 64 * (i + 1));
+      const to = tx.to.toLowerCase();
+      if (to === PONS_FACTORY) rec.token = `0x${word(0).slice(24)}`;
+      else if (to === STONK_PAD && tx.data.startsWith('0x6cb0ea4e')) rec.token = `0x${word(1).slice(24)}`;
+      else if (to === UTOKEN_FACTORY) rec.token = `0x${word(1).slice(24)}`;
       w.evm.push(rec);
       return hash;
     });
@@ -249,11 +265,7 @@ async function setup(page: Page, opts: { evm?: boolean; sol?: boolean; alias?: K
       const b = route.request().postDataJSON() as { method: string; params: unknown[]; id: number };
       const sent = w.evm.find((x) => x.hash === (b.params?.[0] as string));
       if (b.method === 'eth_getTransactionReceipt' && sent) {
-        const pad = (a: string) => `0x${a.replace(/^0x/, '').padStart(64, '0')}`;
-        const logs = sent.token
-          ? [{ address: sent.tx.to, topics: [TOKEN_LAUNCHED, pad(sent.token), pad(sent.curve!), pad(EVM_USER)], data: `0x${'0'.repeat(64)}${'0'.repeat(64)}${'0'.repeat(64)}` }]
-          : [];
-        return route.fulfill({ json: { jsonrpc: '2.0', id: b.id, result: { status: '0x1', blockNumber: '0x10', logs } } });
+        return route.fulfill({ json: { jsonrpc: '2.0', id: b.id, result: { status: '0x1', blockNumber: '0x10', logs: sent.logs } } });
       }
       const real = await rpc(RH_RPC, b.method, b.params);
       return route.fulfill({ json: { ...real, jsonrpc: '2.0', id: b.id } });
@@ -298,11 +310,11 @@ test('solana order on pump.fun: ONE prompt signs payment + launch, worker verifi
   expect(w.sol[0].logs.some((l) => /Memo \(len 24\): "rea4u:q_[a-z2-7]{16}"/.test(l))).toBe(true);
   const id = page.url().split('/p/')[1];
   const job = await w.store.getJob(id);
-  expect(job).toMatchObject({ status: 'running', payer: PAYER, budgetCents: 500, payTx: w.sol[0].sig });
+  expect(job).toMatchObject({ status: 'running', payer: PAYER, budgetCents: 450, payTx: w.sol[0].sig }); // $5 minus the 50c reserve
   expect(w.sol[0].logs).toContain(`transfer:${job!.quote.amount}`);
   expect(job!.token).toMatchObject({ status: 'live', ticker: 'FORGE', pad: 'pump' });
   expect(job!.token.url).toMatch(/^https:\/\/pump\.fun\/coin\//);
-  expect(w.engine.sessions[0]).toMatchObject({ budgetCents: 500, effort: 'medium' });
+  expect(w.engine.sessions[0]).toMatchObject({ budgetCents: 450, effort: 'medium' });
 
   // the project page shows the live job
   await expect(page.locator('#p-title')).toHaveText('Agent Forge');
@@ -343,10 +355,37 @@ test('robinhood chain order on Pons: pay, then launch, simulated on the live cha
   expect(w.evm[1].tx.to.toLowerCase()).toBe('0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e');
   const id = page.url().split('/p/')[1];
   const job = await w.store.getJob(id);
-  expect(job).toMatchObject({ status: 'running', payer: EVM_USER, budgetCents: 1500 });
+  expect(job).toMatchObject({ status: 'running', payer: EVM_USER, budgetCents: 1410 });
+  expect(job!.quote.payer).toBe(EVM_USER);
   expect(job!.token).toMatchObject({ status: 'live', pad: 'pons', mint: w.evm[1].token });
   expect(job!.token.url).toBe(`https://ponsfamily.com/launchpad/${w.evm[1].token}`);
   await expect(page.locator('.token')).toContainText('$FORGE is live');
+});
+
+test('robinhood chain order on StonkLauncher: pay, create, approve, arm', async ({ page }) => {
+  const w = await setup(page, { evm: true });
+  await fillOrder(page, { pad: /StonkLauncher/, name: 'Agent Forge', ticker: 'FORGE' });
+  await expect(page.locator('#summary')).toContainText('4 wallet prompts');
+  await page.locator('#rea-it').click();
+  await expect(page).toHaveURL(/#\/p\/q_[a-z2-7]{16}$/, { timeout: 120_000 });
+  expect(w.prompts).toBe(4);
+  expect(w.evm.map((e) => e.tx.data.slice(0, 10))).toEqual([expect.stringMatching(/^0x7265/), '0x6cb0ea4e', '0x095ea7b3', '0x92040b44']);
+  const job = await w.store.getJob(page.url().split('/p/')[1]);
+  expect(job!.token).toMatchObject({ status: 'live', pad: 'stonk', mint: w.evm[1].token });
+  expect(job!.token.url).toMatch(/^https:\/\/stonkbrokers\.io\/safe-launch\/token\/weth2-forge-\d+$/);
+  await expect(page.locator('.token')).toContainText('$FORGE is live');
+});
+
+test('robinhood chain order on µToken (the launchpad behind stonk.broker): pay, then one launch tx', async ({ page }) => {
+  const w = await setup(page, { evm: true });
+  await fillOrder(page, { pad: /µToken/, name: 'Agent Forge', ticker: 'FORGE' });
+  await expect(page.locator('#summary')).toContainText('2 wallet prompts');
+  await page.locator('#rea-it').click();
+  await expect(page).toHaveURL(/#\/p\/q_[a-z2-7]{16}$/, { timeout: 120_000 });
+  expect(w.prompts).toBe(2);
+  expect(w.evm[1].tx.to.toLowerCase()).toBe(UTOKEN_FACTORY);
+  const job = await w.store.getJob(page.url().split('/p/')[1]);
+  expect(job!.token).toMatchObject({ status: 'live', pad: 'utoken', mint: w.evm[1].token, url: `https://utoken.gg/token/${w.evm[1].token}` });
 });
 
 test('rejecting the wallet prompt pays nothing and starts nothing', async ({ page }) => {
@@ -422,7 +461,8 @@ test('project page: paused job offers top-ups, finished job shows spec + ranked 
   await expect(page.locator('.badge')).toHaveText('DONE');
   await expect(page.locator('.manifest')).toContainText('1/2 features done');
   await expect(page.locator('.host--best')).toContainText('Render');
-  await expect(page.locator('.host--best a')).toHaveAttribute('href', /render\.com\/deploy\?repo=/);
+  await expect(page.locator('.host--best a.btn')).toHaveAttribute('href', /render\.com\/deploy\?repo=/);
+  await expect(page.locator('.host--best')).toContainText('own a copy first');
   await expect(page.locator('.md table')).toContainText('Browse');
   await expect(page.locator('.md')).toContainText('<script>alert(1)</script>');
   expect(await page.locator('.md script').count()).toBe(0);

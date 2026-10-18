@@ -125,7 +125,7 @@ export async function topupJob(id: string, quote: Quote, payTx: string, onWait?:
   }
 }
 
-export async function recordToken(id: string, body: { mint?: string; tx?: string; failed?: boolean }): Promise<JobView> {
+export async function recordToken(id: string, body: { mint?: string; tx?: string; url?: string; armTx?: string; failed?: boolean }): Promise<JobView> {
   // The launch tx can take a few seconds to show up on the API's RPC.
   for (let i = 0; ; i++) {
     try {

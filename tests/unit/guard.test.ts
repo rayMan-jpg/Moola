@@ -30,7 +30,7 @@ const createV2 = (who: PublicKey) => {
     len.writeUInt32LE(b.length);
     return Buffer.concat([len, b]);
   };
-  return Buffer.concat([disc(PROGRAMS.pump), str('Moola'), str('MOOLA'), str('https://turbo-gateway.com/abc'), who.toBuffer(), Buffer.from([0])]);
+  return Buffer.concat([disc(PROGRAMS.pump), str('Rea4u'), str('REA4U'), str('https://turbo-gateway.com/abc'), who.toBuffer(), Buffer.from([0])]);
 };
 
 describe('guardTx (static shape)', () => {

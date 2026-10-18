@@ -89,14 +89,14 @@ describe('job lifecycle', () => {
   it('verifies payment, creates the repo and a budget-capped, outcome-driven session', async () => {
     const w = await world();
     const job = await createJob(req(w), w.d);
-    expect(job).toMatchObject({ id: w.quote.id, status: 'running', payer: PAYER_SOL, budgetCents: 1500, tier: 'standard' });
+    expect(job).toMatchObject({ id: w.quote.id, status: 'running', payer: PAYER_SOL, budgetCents: 1410, tier: 'standard' }); // $15 minus the 6% overshoot reserve
     expect(job.repo?.fullName).toMatch(/^rea4u-builds\/agent-forge-[a-z2-7]{6}$/);
     expect(w.gh.created[0]).toMatchObject({ private: false, auto_init: true, homepage: `https://rea4u.test/app/#/p/${w.quote.id}` });
 
     expect(w.engine.agents).toHaveLength(1);
     expect(w.engine.envs[0].hosts).toContain('github.com');
     const s = w.engine.sessions[0];
-    expect(s.budgetCents).toBe(1500);
+    expect(s.budgetCents).toBe(1410);
     expect(s.effort).toBe('high');
     expect(s.buildRepo).toEqual({ url: job.repo!.url, branch: 'main', token: 'ghp_test' });
     expect(s.engineRepo.url).toMatch(/github\.com/);
@@ -174,8 +174,8 @@ describe('job lifecycle', () => {
     });
     w.payTx = solPaymentTx(tq);
     v = await topupJob(w.quote.id, { quote: tq, payTx: '7'.repeat(88) }, w.d);
-    expect(v).toMatchObject({ status: 'running', budgetCents: 2502 });
-    expect(w.engine.budgets).toEqual([{ id: 'sesn_1', cents: 2502 }]);
+    expect(v).toMatchObject({ status: 'running', budgetCents: 2442 }); // spent 1502 + ($10 - 60c reserve)
+    expect(w.engine.budgets).toEqual([{ id: 'sesn_1', cents: 2442 }]);
     // the same top-up payment can't be applied twice
     await topupJob(w.quote.id, { quote: tq, payTx: '7'.repeat(88) }, w.d);
     expect(w.engine.budgets).toHaveLength(1);

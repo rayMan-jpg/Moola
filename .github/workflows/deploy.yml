@@ -1,0 +1,113 @@
+# One-click deploy of rea4u: the API worker (Cloudflare) + the site (GitHub Pages) pointed at it.
+# Needs the repo secrets and variables listed in SETUP.md. Run it from Actions > "Deploy rea4u".
+name: Deploy rea4u
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-rea4u
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check configuration
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REA4U_GITHUB_TOKEN: ${{ secrets.REA4U_GITHUB_TOKEN }}
+          REA4U_GITHUB_OWNER: ${{ vars.REA4U_GITHUB_OWNER }}
+          TREASURY_SOLANA: ${{ vars.TREASURY_SOLANA }}
+          TREASURY_EVM: ${{ vars.TREASURY_EVM }}
+        run: |
+          missing=""
+          for k in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID ANTHROPIC_API_KEY REA4U_GITHUB_TOKEN REA4U_GITHUB_OWNER; do
+            [ -n "${!k}" ] || missing="$missing $k"
+          done
+          [ -n "$TREASURY_SOLANA$TREASURY_EVM" ] || missing="$missing TREASURY_SOLANA-or-TREASURY_EVM"
+          if [ -n "$missing" ]; then echo "::error::missing secrets/variables:$missing (see SETUP.md)"; exit 1; fi
+
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Test
+        run: npx tsc -p worker/tsconfig.json && npm test
+
+      - name: Deploy the API worker
+        id: worker
+        env:
+          REA4U_GITHUB_OWNER: ${{ vars.REA4U_GITHUB_OWNER }}
+          TREASURY_SOLANA: ${{ vars.TREASURY_SOLANA }}
+          TREASURY_EVM: ${{ vars.TREASURY_EVM }}
+        run: |
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          SITE_URL="https://$(echo "$OWNER" | tr '[:upper:]' '[:lower:]').github.io/${REPO}/"
+          args=(--var "SITE_URL:${SITE_URL}" --var "ENGINE_REPO:https://github.com/${GITHUB_REPOSITORY}" --var "ENGINE_BRANCH:${GITHUB_REF_NAME}" --var "GITHUB_OWNER:${REA4U_GITHUB_OWNER}")
+          [ -n "$TREASURY_SOLANA" ] && args+=(--var "TREASURY_SOLANA:${TREASURY_SOLANA}")
+          [ -n "$TREASURY_EVM" ] && args+=(--var "TREASURY_EVM:${TREASURY_EVM}")
+          npx wrangler deploy "${args[@]}" | tee deploy.log
+          URL="$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -1)"
+          [ -n "$URL" ] || { echo "::error::could not find the workers.dev URL in the deploy output"; exit 1; }
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "site=$SITE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Set worker secrets
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REA4U_GITHUB_TOKEN: ${{ secrets.REA4U_GITHUB_TOKEN }}
+          SOLANA_RPC_SECRET: ${{ secrets.SOLANA_RPC }}
+        run: |
+          umask 077
+          # The quote-signing key is generated once and kept; rotating it only voids open quotes.
+          if npx wrangler secret list --format json | grep -q '"QUOTE_SECRET"'; then QS=""; else QS="$(openssl rand -hex 32)"; fi
+          node -e '
+            const s = { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, GITHUB_TOKEN: process.env.REA4U_GITHUB_TOKEN };
+            if (process.argv[1]) s.QUOTE_SECRET = process.argv[1];
+            if (process.env.SOLANA_RPC_SECRET) s.SOLANA_RPC = process.env.SOLANA_RPC_SECRET;
+            require("fs").writeFileSync("secrets.json", JSON.stringify(s));
+          ' "$QS"
+          npx wrangler secret bulk secrets.json
+          rm -f secrets.json
+
+      - name: Check the API is up
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS "${{ steps.worker.outputs.url }}/api/config" | tee config.out | grep -q '"ok":true'; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::API not ready: $(cat config.out)"; exit 1
+
+      - name: Publish the site pointed at the API
+        env:
+          TREASURY_SOLANA: ${{ vars.TREASURY_SOLANA }}
+          TREASURY_EVM: ${{ vars.TREASURY_EVM }}
+          GIT_AUTHOR_NAME: github-actions
+          GIT_AUTHOR_EMAIL: github-actions@users.noreply.github.com
+        run: |
+          export SITE_CONFIG_JSON="$(node -e '
+            const t = {};
+            if (process.env.TREASURY_SOLANA) t.solana = process.env.TREASURY_SOLANA;
+            if (process.env.TREASURY_EVM) t.robinhood = process.env.TREASURY_EVM;
+            console.log(JSON.stringify({ api: process.argv[1], treasury: t }));
+          ' "${{ steps.worker.outputs.url }}")"
+          ./scripts/deploy-pages.sh
+          echo "### rea4u is live" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Site: ${{ steps.worker.outputs.site }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API: ${{ steps.worker.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"

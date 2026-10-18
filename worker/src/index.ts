@@ -153,7 +153,8 @@ export async function handle(req: Request, env: Env, o: Overrides = {}): Promise
 export async function sweep(env: Env, o: Overrides = {}): Promise<number> {
   if (configured(env).length) return 0;
   const d = deps(env, o);
-  const ids = await d.store.activeJobIds(25);
+  // Free plan: 50 subrequests per invocation; each job sync costs 2-5.
+  const ids = await d.store.activeJobIds(8);
   for (const id of ids) {
     const job = await d.store.getJob(id);
     if (job) await advance(job, d).catch((e) => console.error('sweep', id, e));

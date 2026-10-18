@@ -10,7 +10,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { fundedPayer, testImage } from './helpers';
 it.runIf(process.env.DUMP)('dump', async () => {
   const payer = await fundedPayer();
-  const input = { name: 'Moola Sim', ticker: 'MSIM', description: 'x', image: testImage(), devBuySol: 0.05, creator: payer };
+  const input = { name: 'Rea4u Sim', ticker: 'MSIM', description: 'x', image: testImage(), devBuySol: 0.05, creator: payer };
   const show = (label: string, tx: any) => {
     const keys = tx.message.staticAccountKeys.map((k: any) => k.toBase58());
     console.log(label, tx.message.compiledInstructions.map((ix: any) => `${keys[ix.programIdIndex].slice(0, 8)}:${Buffer.from(ix.data.slice(0, 8)).toString('hex')}:${ix.accountKeyIndexes.length}`).join(' | '));

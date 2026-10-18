@@ -99,6 +99,16 @@ describe('solana payment verification (real tx shape)', () => {
     expect(await verifySolanaPayment('nope', q, ['https://sol.test'], rpc(null))).toMatchObject({ ok: false, pending: false });
   });
 
+  it('accepts an untagged transfer only from the wallet the quote was issued to', async () => {
+    const { fetch } = mockFetch([[...ghRepo()], PRICES.coinbase('SOL', 150), PRICES.kraken('SOLUSD', 150)]);
+    const bound = (await makeQuote({ target: 'affaan-m/ECC', tier: 'standard', chain: 'solana', payer: PAYER_SOL }, testEnv(), { fetch })).quote;
+    expect(bound.payer).toBe(PAYER_SOL);
+    const untagged = solPaymentTx(bound, { memo: 'something else' });
+    expect(await verifySolanaPayment(SOL_SIG, bound, ['https://sol.test'], rpc(untagged))).toMatchObject({ ok: true, payer: PAYER_SOL });
+    const unbound = await solQuote();
+    expect(await verifySolanaPayment(SOL_SIG, unbound, ['https://sol.test'], rpc(solPaymentTx(unbound, { memo: 'something else' })))).toMatchObject({ ok: false });
+  });
+
   it('only counts transfers into the treasury', async () => {
     const q = await solQuote();
     const tx = solPaymentTx(q);
@@ -128,6 +138,16 @@ describe('robinhood chain payment verification', () => {
     expect(await verifyEvmPayment(EVM_HASH, q, ['https://rh.test'], rpc(evmPayment(q)))).toMatchObject({ ok: true, payer: PAYER_EVM.toLowerCase() });
   });
 
+  it('accepts calldata-stripped sends from the quoted payer, never from anyone else', async () => {
+    const { fetch } = mockFetch([[...ghRepo()], PRICES.coinbase('ETH', 3000), PRICES.kraken('XETHZUSD', 3000)]);
+    const q = (await makeQuote({ target: 'affaan-m/ECC', tier: 'lite', chain: 'robinhood', payer: PAYER_EVM.toUpperCase().replace('0X', '0x') }, testEnv(), { fetch })).quote;
+    expect(q.payer).toBe(PAYER_EVM);
+    expect(await verifyEvmPayment(EVM_HASH, q, ['https://rh.test'], rpc(evmPayment(q, { input: '0x' })))).toMatchObject({ ok: true });
+    // a different tag is a different quote's payment
+    expect(await verifyEvmPayment(EVM_HASH, q, ['https://rh.test'], rpc(evmPayment(q, { input: '0x1234' })))).toMatchObject({ ok: false });
+    await expect(makeQuote({ target: 'affaan-m/ECC', tier: 'lite', chain: 'robinhood', payer: 'not-an-address' }, testEnv(), { fetch })).rejects.toThrow(/payer/);
+  });
+
   it('rejects wrong recipient, memo, amount, chain, reverted and pending txs', async () => {
     const q = await evmQuote();
     const check = (o: Parameters<typeof evmPayment>[1]) => verifyEvmPayment(EVM_HASH, q, ['https://rh.test'], rpc(evmPayment(q, o)));
@@ -138,5 +158,19 @@ describe('robinhood chain payment verification', () => {
     expect(await check({ status: '0x0' })).toMatchObject({ ok: false, reason: expect.stringMatching(/failed/) });
     expect(await check({ ts: q.expiresAt + 3_600_000 })).toMatchObject({ ok: false, reason: expect.stringMatching(/expired/) });
     expect(await verifyEvmPayment(EVM_HASH, q, ['https://rh.test'], rpc(null))).toMatchObject({ ok: false, pending: true });
+  });
+});
+
+describe('price feed', () => {
+  const quote = (routes: Parameters<typeof mockFetch>[0]) =>
+    makeQuote({ target: 'affaan-m/ECC', tier: 'lite', chain: 'solana' }, testEnv(), { fetch: mockFetch([[...ghRepo()], ...routes]).fetch });
+
+  it('takes the median of three exchanges, ignoring one outlier', async () => {
+    const { quote: q } = await quote([PRICES.coinbase('SOL', 100), PRICES.kraken('SOLUSD', 101), PRICES.gemini('SOL', 160)]);
+    expect(q.priceUsd).toBe(101);
+  });
+
+  it('refuses with fewer than two answering sources', async () => {
+    await expect(quote([PRICES.coinbase('SOL', 100)])).rejects.toThrow(/not enough/);
   });
 });

@@ -101,8 +101,9 @@ export const pons: EvmLaunchpad = {
   name: 'Pons',
   tagline: 'Robinhood Chain #1 launchpad',
   badge: 'HOOD',
-  costHint: '0.0005 ETH launch fee + ~$0.20 gas',
+  costHint: '0.0005 ETH launch fee + ~$0.20 gas; v2 contracts unaudited',
   devBuy: true,
+  launchPrompts: 1,
   overheadEth: 0.0007,
   async prepare(input: EvmLaunchInput): Promise<PreparedEvmLaunch> {
     const [launchFee, expectedEconomics, canLaunch] = await Promise.all([

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/wrangler@4.145.0/config-schema.json",
+  "name": "PROJECT_SLUG",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./public", "not_found_handling": "single-page-application" },
+  "d1_databases": [{ "binding": "DB", "database_name": "PROJECT_SLUG-db" }],
+  "kv_namespaces": [{ "binding": "CACHE" }]
+}

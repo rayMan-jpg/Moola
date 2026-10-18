@@ -16,7 +16,7 @@ import { fundedPayer, testImage, sim } from './helpers';
 let payer = '';
 let uri = '';
 const input = (devBuySol: number): LaunchInput => ({
-  name: 'Moola Sim Test',
+  name: 'Rea4u Sim Test',
   ticker: 'MSIM',
   description: 'simulation only, never launched',
   image: testImage(),
@@ -32,7 +32,7 @@ beforeAll(async () => {
 describe('metadata', () => {
   it('is readable from the gateway right away', async () => {
     const meta = await (await fetch(uri)).json();
-    expect(meta).toMatchObject({ name: 'Moola Sim Test', symbol: 'MSIM', createdOn: 'https://pump.fun' });
+    expect(meta).toMatchObject({ name: 'Rea4u Sim Test', symbol: 'MSIM', createdOn: 'https://pump.fun' });
     const img = await fetch(meta.image);
     expect(img.status).toBe(200);
     expect(img.headers.get('content-type')).toMatch(/image\/jpeg/);
@@ -42,13 +42,13 @@ describe('metadata', () => {
 describe('pump.fun builders', () => {
   for (const devBuySol of [0, 0.05]) {
     it(`official SDK create_v2 (dev buy ${devBuySol})`, async () => {
-      const { tx } = await buildPumpSdkTx({ rpcUrl: DEFAULT_RPCS[0], creator: payer, name: 'Moola Sim Test', symbol: 'MSIM', uri, devBuySol });
+      const { tx } = await buildPumpSdkTx({ rpcUrl: DEFAULT_RPCS[0], creator: payer, name: 'Rea4u Sim Test', symbol: 'MSIM', uri, devBuySol });
       expect(tx.serialize().length).toBeLessThanOrEqual(1232);
       const r = await sim(tx);
       expect(r.err, (r.logs ?? []).slice(-8).join('\n')).toBeNull();
     });
     it(`PumpPortal create (dev buy ${devBuySol})`, async () => {
-      const { tx, mint } = await buildCreateTx({ creator: payer, name: 'Moola Sim Test', symbol: 'MSIM', uri, devBuySol, pool: 'pump' }, fetch, Keypair.generate());
+      const { tx, mint } = await buildCreateTx({ creator: payer, name: 'Rea4u Sim Test', symbol: 'MSIM', uri, devBuySol, pool: 'pump' }, fetch, Keypair.generate());
       expect(() => guardTx(tx, { creator: payer, mint: mint.publicKey.toBase58(), allow: [PROGRAMS.pump, PROGRAMS.ata, PROGRAMS.pumpPortalProxy] })).not.toThrow();
       const r = await sim(tx, [payer]);
       expect(r.err, (r.logs ?? []).slice(-8).join('\n')).toBeNull();

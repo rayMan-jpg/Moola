@@ -17,11 +17,20 @@ npm run build
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 # Keep the previous deploy's hashed assets so tabs opened before this deploy can still lazy-load chunks.
+PREV_CONFIG=""
 if git fetch -q --depth 1 "$ORIGIN" gh-pages 2>/dev/null; then
   mkdir -p "$TMP/assets"
   git archive FETCH_HEAD assets 2>/dev/null | tar -x -C "$TMP" || true
+  PREV_CONFIG="$(git show FETCH_HEAD:config.json 2>/dev/null || true)"
 fi
 cp -r dist/. "$TMP/"
+# config.json points the site at the API worker and pins the treasury addresses. The backend
+# workflow passes a fresh one; a site-only redeploy keeps whatever is live.
+if [ -n "${SITE_CONFIG_JSON:-}" ]; then
+  printf '%s\n' "$SITE_CONFIG_JSON" > "$TMP/config.json"
+elif [ -n "$PREV_CONFIG" ]; then
+  printf '%s\n' "$PREV_CONFIG" > "$TMP/config.json"
+fi
 touch "$TMP/.nojekyll"
 cd "$TMP"
 git init -q -b gh-pages

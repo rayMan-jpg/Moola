@@ -2,7 +2,7 @@
 // Nothing in here may touch the DOM, Node or Workers-only APIs.
 
 export type ChainId = 'solana' | 'robinhood';
-export type PadId = 'pump' | 'jup' | 'bonk' | 'pons' | 'stonk';
+export type PadId = 'pump' | 'jup' | 'bonk' | 'pons' | 'stonk' | 'utoken';
 export type Tier = 'lite' | 'standard' | 'deep';
 export type TargetKind = 'github' | 'web';
 
@@ -12,6 +12,7 @@ export const PAD_CHAIN: Record<PadId, ChainId> = {
   bonk: 'solana',
   pons: 'robinhood',
   stonk: 'robinhood',
+  utoken: 'robinhood',
 };
 
 export const CHAIN_ASSET: Record<ChainId, { symbol: 'SOL' | 'ETH'; decimals: number }> = {
@@ -98,6 +99,8 @@ export interface Quote {
   treasury: string;
   /** EVM chain id for robinhood quotes. */
   evmChainId?: number;
+  /** Wallet expected to pay (lowercase on EVM). Lets a payment whose tag a wallet dropped still match. */
+  payer?: string;
   issuedAt: number;
   expiresAt: number;
   sig: string;
@@ -107,6 +110,7 @@ export interface QuoteRequest {
   target: string;
   tier: Tier;
   chain: ChainId;
+  payer?: string;
   topup?: string;
   usdCents?: number;
 }

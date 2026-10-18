@@ -26,4 +26,9 @@ export interface Env {
   MODEL?: string;
   /** Percent added on top of the Claude budget, default 0. */
   MARGIN_PCT?: string;
+  /**
+   * Part of each payment held back from the session cap (percent, min 50 cents), default 6. The cap
+   * is checked before each model request, so the last request can overshoot it.
+   */
+  RESERVE_PCT?: string;
 }

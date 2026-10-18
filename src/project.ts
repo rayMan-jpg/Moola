@@ -202,6 +202,7 @@ function hostingBox(job: JobView, hosts: ReturnType<typeof recommendHosts>) {
           <span class="pad__meta mono">${esc(h.cost)}</span>
           ${h.deployUrl && !pending ? `<a class="btn btn--small" href="${esc(h.deployUrl)}" target="_blank" rel="noopener">${h.id === 'ghpages' && job.live ? 'Open live site' : 'Deploy'}</a>` : ''}
           ${h.steps && !pending ? `<code class="mono">${esc(h.steps)}</code>` : ''}
+          ${h.forkFirst && !pending && job.repo ? `<a class="pad__meta" href="${esc(job.repo.url)}/generate" target="_blank" rel="noopener">own a copy first (use as template)</a>` : ''}
         </div>`,
       )
       .join('')}</div>

@@ -143,6 +143,13 @@ export async function makeQuote(req: QuoteRequest, env: Env, deps: QuoteDeps): P
     usdCents = TIERS[tier].usdCents;
   }
 
+  let payer: string | undefined;
+  if (req.payer !== undefined) {
+    const ok = chain === 'solana' ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(req.payer) : /^0x[0-9a-fA-F]{40}$/.test(req.payer);
+    if (!ok) throw new HttpError(400, 'bad payer address');
+    payer = chain === 'solana' ? req.payer : req.payer.toLowerCase();
+  }
+
   const margin = Math.max(0, Number(env.MARGIN_PCT ?? 0) || 0);
   const chargeCents = Math.ceil(usdCents * (1 + margin / 100));
   const asset = CHAIN_ASSET[chain];
@@ -163,6 +170,7 @@ export async function makeQuote(req: QuoteRequest, env: Env, deps: QuoteDeps): P
       priceUsd: price,
       treasury,
       ...(evmChainId ? { evmChainId } : {}),
+      ...(payer ? { payer } : {}),
       issuedAt: now,
       expiresAt: now + QUOTE_TTL_MS,
     },

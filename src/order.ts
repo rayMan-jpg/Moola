@@ -317,8 +317,8 @@ function stepsFor(pad: PadInfo): Step[] {
 function renderSteps(pad: PadInfo) {
   const labels = { ...STEP_LABELS };
   if (pad.chain === 'robinhood') {
-    labels.pay = 'Pay in your wallet (prompt 1 of 2)';
-    labels.launch = 'Launch in your wallet (prompt 2 of 2)';
+    labels.pay = `Pay in your wallet (prompt 1 of ${pad.prompts})`;
+    labels.launch = pad.prompts > 2 ? `Launch in your wallet (prompts 2-${pad.prompts})` : `Launch in your wallet (prompt 2 of ${pad.prompts})`;
   }
   els.steps.innerHTML = stepsFor(pad)
     .map((s) => `<li data-step="${s}">${esc(labels[s])}</li>`)

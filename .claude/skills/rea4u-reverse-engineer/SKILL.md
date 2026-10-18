@@ -64,10 +64,12 @@ Prefer boring, popular, well-documented dependencies, and pin their versions. Or
 
 **.env.example**: every variable, commented.
 
-**Deploy files**, added according to what the app is:
-- Static: build with a relative base (for example `base: './'`) so it works under a sub-path. Then push the built output to a `gh-pages` branch (for example `git worktree add /tmp/gh gh-pages --orphan`, or `git subtree push --prefix dist origin gh-pages` after committing dist on a temp branch). rea4u switches on GitHub Pages for that branch, so the user gets a free live link. Add `netlify.toml` or `vercel.json` only if the defaults need overriding.
-- Server or full-stack: a `Dockerfile` that listens on `$PORT` (default 3000), and a `render.yaml` blueprint (web service, plus a database if needed, on the free plan where possible).
+**Deploy files**: copy them from this skill's `templates/` folder (they're schema-checked), swap `PROJECT_SLUG` for the repo-safe project name, and fix the build, output and start fields to match the app:
+- Static (no server code in production): everything in `templates/static/` (`wrangler.jsonc` makes the Cloudflare deploy button work; `netlify.toml`, `vercel.json` and `render.yaml` cover the other hosts). Build with a relative base (for example Vite `base: './'`) so it also works under `/<repo>/`, and copy `index.html` to `404.html` for SPA routes. Then push the built output to a `gh-pages` branch (for example commit `dist` on a temp branch and run `git subtree push --prefix dist origin gh-pages`). rea4u switches on GitHub Pages for that branch, so the user gets a free live link with no login.
+- Server or full-stack: `templates/server/` (the `Dockerfile`, `fly.toml` and `render.yaml`). The app must listen on `0.0.0.0:$PORT`: every host injects PORT, and Render's default is 10000. If it needs Postgres or Redis, use `templates/server-postgres/render.yaml` instead, which wires `DATABASE_URL` from a managed database.
+- Built for Cloudflare Workers (Hono and the like, D1/KV): `templates/workers/` (a `wrangler.jsonc` with bindings and no IDs, which the deploy button provisions, plus `.dev.vars.example`). Check it with `npx wrangler deploy --dry-run`.
 - The server needs a database: support `DATABASE_URL`. If it's unset, fall back to SQLite or an in-memory store so the app still runs.
+- Never commit Railway `railway.json`/`railway.toml`; that config is deprecated.
 
 **rea4u.json** goes at the repo root and in /mnt/session/outputs. Every field must be true:
 
@@ -83,7 +85,7 @@ Prefer boring, popular, well-documented dependencies, and pin their versions. Or
   "build": { "install": "npm ci", "build": "npm run build", "start": "npm start", "output": "dist", "port": 3000 },
   "features": [{ "name": "Create and share boards", "status": "done" }],
   "verified": { "build": true, "tests": "12 passed", "smoke": true },
-  "deploy": { "dockerfile": false, "files": ["netlify.toml"] }
+  "deploy": { "dockerfile": false, "files": ["wrangler.jsonc", "netlify.toml", "vercel.json", "render.yaml"] }
 }
 ```
 

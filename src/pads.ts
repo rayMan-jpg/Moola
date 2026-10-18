@@ -3,6 +3,8 @@ import type { ChainId, PadId } from '../shared/contract';
 import type { EvmLaunchpad } from './launchpads/evm';
 import { LAUNCHPADS } from './launchpads';
 import { pons } from './launchpads/pons';
+import { stonk } from './launchpads/stonk';
+import { utoken } from './launchpads/utoken';
 import type { Launchpad } from './launchpads/types';
 
 export interface PadInfo {
@@ -42,22 +44,12 @@ const evm = (p: EvmLaunchpad): PadInfo => ({
   badge: p.badge,
   costHint: p.costHint,
   devBuy: p.devBuy,
-  prompts: 2,
+  // the payment, then the launch's own transactions
+  prompts: 1 + p.launchPrompts,
   evm: p,
 });
 
-const STONK_SOON: PadInfo = {
-  id: 'stonk',
-  chain: 'robinhood',
-  name: 'StonkLauncher',
-  tagline: 'stonk.broker on Robinhood Chain',
-  costHint: 'coming next',
-  devBuy: false,
-  prompts: 2,
-  soon: 'soon',
-};
-
-export const PADS: PadInfo[] = [...LAUNCHPADS.map(sol), evm(pons), STONK_SOON];
+export const PADS: PadInfo[] = [...LAUNCHPADS.map(sol), evm(pons), evm(stonk), evm(utoken)];
 
 export function padInfo(id: string): PadInfo {
   return PADS.find((p) => p.id === id && !p.soon) ?? PADS[0];

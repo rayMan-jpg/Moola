@@ -2,7 +2,7 @@
 // api.mainnet-beta.solana.com answers 403 to any request with a browser Origin, so it is not listed.
 export const DEFAULT_RPCS = ['https://solana-rpc.publicnode.com'];
 
-const RPC_KEY = 'moola.rpc';
+const RPC_KEY = 'rea4u.rpc';
 const REQUEST_TIMEOUT_MS = 10_000;
 
 export function rpcUrls(): string[] {

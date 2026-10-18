@@ -98,4 +98,5 @@ export { FakeEngine } from './fakeEngine';
 export const PRICES = {
   coinbase: (sym: string, price: number) => ['GET', new RegExp(`api\\.coinbase\\.com/v2/prices/${sym}-USD`), () => ({ data: { amount: String(price) } })] as [string, RegExp, Handler],
   kraken: (pair: string, price: number) => ['GET', new RegExp(`api\\.kraken\\.com.*pair=${pair}`), () => ({ error: [], result: { X: { c: [String(price), '1'] } } })] as [string, RegExp, Handler],
+  gemini: (sym: string, price: number) => ['GET', new RegExp(`api\\.gemini\\.com/v1/pubticker/${sym.toLowerCase()}usd`), () => ({ last: String(price) })] as [string, RegExp, Handler],
 };

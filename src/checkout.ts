@@ -9,7 +9,7 @@ import { VersionedTransaction } from '@solana/web3.js';
 import { formatUsd, payMemo, type HostingNeeds, type JobRequest, type JobView, type Target, type Tier } from '../shared/contract';
 import { createJob, getQuote, recordToken, rememberJob, topupJob } from './api';
 import { friendlyError } from './errors';
-import { getBalanceEth, sendEvm, utf8Hex, waitReceipt } from './evm/chain';
+import { evmRpc, getBalanceEth, sendEvm, utf8Hex, waitReceipt } from './evm/chain';
 import { uploadImage } from './metadata';
 import type { PadInfo } from './pads';
 import { buildSolPayment, PAY_FEE_SOL } from './payment';
@@ -104,6 +104,18 @@ async function register(req: JobRequest, h: Hooks) {
   clearPending(req.quote.id);
 }
 
+/**
+ * ETH payments are verified as plain transfers (tx.to = treasury). Smart-contract wallets (Safe,
+ * ERC-4337) wrap them in contract calls the public RPCs can't trace, so they're refused up front.
+ * EIP-7702 delegated EOAs (code 0xef0100...) still send plain transactions and are fine.
+ */
+async function assertPlainEvmAccount(address: string) {
+  const code = (await evmRpc<string>('eth_getCode', [address, 'latest']).catch(() => '0x')) || '0x';
+  if (code !== '0x' && !code.toLowerCase().startsWith('0xef0100')) {
+    throw friendly("smart-contract wallets can't pay on Robinhood Chain yet (the payment can't be verified). use a regular account in MetaMask, Rabby or Phantom.");
+  }
+}
+
 export async function placeOrder(o: OrderInput, h: Hooks): Promise<OrderResult> {
   return o.pad.chain === 'solana' ? solanaOrder(o, h) : evmOrder(o, h);
 }
@@ -125,7 +137,7 @@ async function solanaOrder(o: OrderInput, h: Hooks): Promise<OrderResult> {
   const devBuySol = lp.devBuy ? o.devBuy : 0;
 
   h.step('quote');
-  const { quote, note } = await getQuote({ target: o.target.url, tier: o.tier, chain: 'solana' });
+  const { quote, note } = await getQuote({ target: o.target.url, tier: o.tier, chain: 'solana', payer: wallet.address });
   if (note) h.note(note);
   const bal = await getBalanceSol(wallet.address).catch(() => null);
   const need = Number(quote.amount) / 1e9 + devBuySol + lp.overheadSol + PAY_FEE_SOL;
@@ -200,10 +212,11 @@ async function solanaOrder(o: OrderInput, h: Hooks): Promise<OrderResult> {
 async function evmOrder(o: OrderInput, h: Hooks): Promise<OrderResult> {
   const lp = o.pad.evm!;
   const wallet = await ensureEvm(h.handoff);
+  await assertPlainEvmAccount(wallet.address);
   const devBuyEth = lp.devBuy ? o.devBuy : 0;
 
   h.step('quote');
-  const { quote, note } = await getQuote({ target: o.target.url, tier: o.tier, chain: 'robinhood' });
+  const { quote, note } = await getQuote({ target: o.target.url, tier: o.tier, chain: 'robinhood', payer: wallet.address });
   if (note) h.note(note);
   const bal = await getBalanceEth(wallet.address).catch(() => null);
   const need = Number(quote.amount) / 1e18 + devBuyEth + lp.overheadEth;
@@ -227,8 +240,8 @@ async function evmOrder(o: OrderInput, h: Hooks): Promise<OrderResult> {
 
   h.step('launch');
   try {
-    const { hash, token } = await sendEvmLaunch(prepared, wallet);
-    await recordToken(quote.id, { mint: token, tx: hash });
+    const { hash, token, url, armTx } = await sendEvmLaunch(prepared, wallet, h);
+    await recordToken(quote.id, { mint: token, tx: hash, url, armTx });
     return { jobId: quote.id, launched: true };
   } catch (e) {
     await recordToken(quote.id, { failed: true }).catch(() => undefined);
@@ -236,13 +249,22 @@ async function evmOrder(o: OrderInput, h: Hooks): Promise<OrderResult> {
   }
 }
 
-async function sendEvmLaunch(prepared: Awaited<ReturnType<NonNullable<PadInfo['evm']>['prepare']>>, wallet: NonNullable<typeof wallets.evm>) {
+async function sendEvmLaunch(prepared: Awaited<ReturnType<NonNullable<PadInfo['evm']>['prepare']>>, wallet: NonNullable<typeof wallets.evm>, h?: Hooks) {
   const hash = await sendEvm(wallet, prepared.tx);
   const rc = await waitReceipt(hash);
   if (rc.status !== '0x1') throw friendly('the launch reverted on-chain. relaunch from your project page, no extra charge.');
   const token = prepared.tokenFrom(rc) ?? prepared.predicted;
   if (!token) throw friendly('launched, but could not read the token address. check the explorer.');
-  return { hash, token };
+  // e.g. StonkLauncher's approve + arm: the token exists but isn't tradeable until these land
+  const steps = prepared.followUps?.(rc) ?? [];
+  let last: string | undefined;
+  for (const [i, f] of steps.entries()) {
+    h?.note(`launch step ${i + 2} of ${steps.length + 1}: ${f.label} (confirm in your wallet)`);
+    last = await sendEvm(wallet, f.tx);
+    const r = await waitReceipt(last);
+    if (r.status !== '0x1') throw friendly(`couldn't ${f.label}. the token exists but isn't live yet: finish it on the launchpad's site.`);
+  }
+  return { hash, token, url: prepared.coinUrl(token, rc), armTx: last };
 }
 
 /** Project page: launch (or relaunch) the job's token without paying again. Must be the paying wallet. */
@@ -290,14 +312,15 @@ export async function launchForJob(job: JobView, pad: PadInfo, image: Blob, h: H
   h.step('build');
   const prepared = await pad.evm!.prepare({ name: t.name, ticker: t.ticker, description: tokenDescription(t.name, t.ticker), logo, website: page, devBuyEth: 0, creator: wallet.address });
   h.step('launch');
-  const { hash, token } = await sendEvmLaunch(prepared, wallet);
-  await recordToken(job.id, { mint: token, tx: hash });
+  const { hash, token, url, armTx } = await sendEvmLaunch(prepared, wallet, h);
+  await recordToken(job.id, { mint: token, tx: hash, url, armTx });
 }
 
 /** Project page: pay more to raise a paused job's budget. Anyone can top up a job. */
 export async function topUp(job: JobView, usdCents: number, h: Hooks): Promise<JobView> {
+  const payer = job.chain === 'solana' ? (await ensureSol(h.handoff)).address : (await ensureEvm(h.handoff)).address;
   h.step('quote');
-  const { quote } = await getQuote({ target: job.target.url, tier: job.tier, chain: job.chain, topup: job.id, usdCents });
+  const { quote } = await getQuote({ target: job.target.url, tier: job.tier, chain: job.chain, topup: job.id, usdCents, payer });
   let tx: string;
   if (job.chain === 'solana') {
     const wallet = await ensureSol(h.handoff);
@@ -316,6 +339,7 @@ export async function topUp(job: JobView, usdCents: number, h: Hooks): Promise<J
     if (st.status === 'failed' || st.status === 'expired') throw friendly(`the top-up ${st.status === 'failed' ? 'failed' : 'expired'}. nothing was charged.`);
   } else {
     const wallet = await ensureEvm(h.handoff);
+    await assertPlainEvmAccount(wallet.address);
     h.step('pay');
     tx = await sendEvm(wallet, { to: quote.treasury as `0x${string}`, data: utf8Hex(payMemo(quote.id)), value: BigInt(quote.amount) });
     const r = await waitReceipt(tx);
