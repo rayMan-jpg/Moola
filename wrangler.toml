@@ -1,0 +1,25 @@
+# rea4u API worker. Deployed by .github/workflows/backend.yml (see SETUP.md).
+name = "rea4u-api"
+main = "worker/src/index.ts"
+compatibility_date = "2026-09-30"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# Advance in-flight jobs nobody is watching (finalize, enable Pages, archive environments).
+[triggers]
+crons = ["*/10 * * * *"]
+
+# Created automatically on first deploy.
+[[d1_databases]]
+binding = "DB"
+database_name = "rea4u"
+
+[vars]
+SITE_URL = "https://rayman-jpg.github.io/Moola/"
+ENGINE_REPO = "https://github.com/rayman-jpg/Moola"
+ENGINE_BRANCH = "claude/moola-degen-launcher"
+SOLANA_RPC = "https://solana-rpc.publicnode.com,https://api.mainnet-beta.solana.com"
+MARGIN_PCT = "0"
+
+[observability]
+enabled = true
