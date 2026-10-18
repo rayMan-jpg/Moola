@@ -92,8 +92,16 @@ export interface TokenBalance {
   uiTokenAmount: { amount: string };
 }
 
+export interface SimAccount {
+  owner: string;
+  lamports: number;
+}
+
 export interface SimResult {
   err: unknown;
+  /** Post-simulation state of the addresses passed in `watch`, in order. */
+  accounts?: (SimAccount | null)[] | null;
+  loadedAddresses?: { writable: string[]; readonly: string[] };
   logs: string[] | null;
   unitsConsumed?: number;
   preBalances?: number[];
@@ -103,8 +111,17 @@ export interface SimResult {
 }
 
 /** Dry-runs a transaction against live mainnet state without needing (or checking) signatures. */
-export async function simulateTx(tx: Uint8Array): Promise<SimResult> {
-  const params = [toBase64(tx), { encoding: 'base64', sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed' }];
+export async function simulateTx(tx: Uint8Array, watch: string[] = []): Promise<SimResult> {
+  const params = [
+    toBase64(tx),
+    {
+      encoding: 'base64',
+      sigVerify: false,
+      replaceRecentBlockhash: true,
+      commitment: 'confirmed',
+      ...(watch.length ? { accounts: { encoding: 'base64', addresses: watch } } : {}),
+    },
+  ];
   let r = await rpc<{ value: SimResult }>('simulateTransaction', params);
   // Balance deltas are needed for the spend check; older custom nodes may not return them.
   if (!r.value.preBalances && rpcUrls()[0] !== DEFAULT_RPCS[0]) r = await rpc<{ value: SimResult }>('simulateTransaction', params, DEFAULT_RPCS);

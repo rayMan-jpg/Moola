@@ -50,7 +50,7 @@ describe('pump.fun builders', () => {
     it(`PumpPortal create (dev buy ${devBuySol})`, async () => {
       const { tx, mint } = await buildCreateTx({ creator: payer, name: 'Moola Sim Test', symbol: 'MSIM', uri, devBuySol, pool: 'pump' }, fetch, Keypair.generate());
       expect(() => guardTx(tx, { creator: payer, mint: mint.publicKey.toBase58(), allow: [PROGRAMS.pump, PROGRAMS.ata, PROGRAMS.pumpPortalProxy] })).not.toThrow();
-      const r = await sim(tx);
+      const r = await sim(tx, [payer]);
       expect(r.err, (r.logs ?? []).slice(-8).join('\n')).toBeNull();
       expect(checkEffects(r, tx, { creator: payer, maxSpendSol: pumpMaxSpend(devBuySol) })).toBeNull();
     });

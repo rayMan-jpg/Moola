@@ -17,6 +17,6 @@ export function testImage(): Blob {
   return new Blob([bytes], { type: 'image/jpeg' });
 }
 
-export async function sim(tx: { serialize(): Uint8Array }) {
-  return simulateTx(tx.serialize());
+export async function sim(tx: { serialize(): Uint8Array }, watch: string[] = []) {
+  return simulateTx(tx.serialize(), watch);
 }

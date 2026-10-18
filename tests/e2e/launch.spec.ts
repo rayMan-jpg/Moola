@@ -31,10 +31,16 @@ async function nodeRpc(method: string, params: unknown[]) {
 }
 
 /** Simulate base64 tx bytes; if the fee payer is the unfunded test key, swap in the funded payer first. */
-async function simulateB64(b64: string, alias?: Key) {
+async function simulateB64(b64: string, alias?: Key, config: Record<string, unknown> = {}) {
   let bytes: Uint8Array = Buffer.from(b64, 'base64');
-  if (alias && same(payer(bytes), alias.publicKey)) bytes = withPayer(bytes, bs58.decode(PAYER));
-  return nodeRpc('simulateTransaction', [Buffer.from(bytes).toString('base64'), { encoding: 'base64', sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed' }]);
+  const cfg = { ...config, encoding: 'base64', sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed' };
+  if (alias && same(payer(bytes), alias.publicKey)) {
+    bytes = withPayer(bytes, bs58.decode(PAYER));
+    // The app watches its own (unfunded) address; watch the stand-in payer instead.
+    const acc = cfg.accounts as { addresses: string[] } | undefined;
+    if (acc) cfg.accounts = { ...acc, addresses: acc.addresses.map((a) => (a === bs58.encode(alias.publicKey) ? PAYER : a)) };
+  }
+  return nodeRpc('simulateTransaction', [Buffer.from(bytes).toString('base64'), cfg]);
 }
 
 /**
@@ -82,7 +88,8 @@ async function setup(page: Page, alias?: Key): Promise<Ctx> {
       return route.fulfill({ json: { jsonrpc: '2.0', id: body.id, result: { context: { slot: 1 }, value: [ok ? { confirmationStatus: 'confirmed', err: null } : { confirmationStatus: 'processed', err: { sim: 'failed' } }] } } });
     }
     if (alias && body?.method === 'simulateTransaction') {
-      const real = await simulateB64((body.params as [string])[0], alias);
+      const [b64, cfg] = body.params as [string, Record<string, unknown>];
+      const real = await simulateB64(b64, alias, cfg);
       return route.fulfill({ json: { ...real, id: body.id } });
     }
     if (alias && body?.method === 'getBalance' && (body.params as string[])[0] === address) {

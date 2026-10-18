@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedTransaction } from '@solana/web3.js';
-import { guardTx, checkEffects, wsolAta, PROGRAMS, DISCRIMINATORS, GuardError } from '../../src/launchpads/guard';
+import { guardTx, checkEffects, createV2Creator, wsolAta, PROGRAMS, DISCRIMINATORS, GuardError } from '../../src/launchpads/guard';
 import type { SimResult } from '../../src/rpc';
 
 const creator = Keypair.generate().publicKey;
@@ -22,6 +22,16 @@ const wrap = (lamports: number) => SystemProgram.transfer({ fromPubkey: creator,
 const sync = () => new TransactionInstruction({ programId: new PublicKey(PROGRAMS.token), keys: [{ pubkey: new PublicKey(wsolAta(creator.toBase58())), isSigner: false, isWritable: true }], data: Buffer.from([17]) });
 const cb = ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 });
 const bonkOpts = { creator: creator.toBase58(), mint: mint.toBase58(), allow: [PROGRAMS.launchLab, PROGRAMS.ata, PROGRAMS.system, PROGRAMS.token], wrapLamports: 50_000_000 };
+
+const createV2 = (who: PublicKey) => {
+  const str = (x: string) => {
+    const b = Buffer.from(x);
+    const len = Buffer.alloc(4);
+    len.writeUInt32LE(b.length);
+    return Buffer.concat([len, b]);
+  };
+  return Buffer.concat([disc(PROGRAMS.pump), str('Moola'), str('MOOLA'), str('https://turbo-gateway.com/abc'), who.toBuffer(), Buffer.from([0])]);
+};
 
 describe('guardTx (static shape)', () => {
   it('accepts a legit bonk-shaped launch with a WSOL wrap of the dev buy', () => {
@@ -64,16 +74,30 @@ describe('guardTx (static shape)', () => {
   });
 
   it('only allows the PumpPortal proxy when asked', () => {
-    const t = tx(cb, call(PROGRAMS.pump), call(PROGRAMS.pumpPortalProxy));
+    const t = tx(cb, call(PROGRAMS.pump, createV2(creator)), call(PROGRAMS.pumpPortalProxy));
     const o = { creator: creator.toBase58(), mint: mint.toBase58() };
     expect(() => guardTx(t, { ...o, allow: [PROGRAMS.pump, PROGRAMS.ata] })).toThrow(GuardError);
     expect(() => guardTx(t, { ...o, allow: [PROGRAMS.pump, PROGRAMS.ata, PROGRAMS.pumpPortalProxy] })).not.toThrow();
   });
 });
 
+describe('pump create_v2 creator check', () => {
+  const o = { creator: creator.toBase58(), mint: mint.toBase58(), allow: [PROGRAMS.pump, PROGRAMS.ata] };
+  it('decodes the creator argument', () => {
+    expect(createV2Creator(createV2(creator))).toBe(creator.toBase58());
+    expect(createV2Creator(disc(PROGRAMS.pump))).toBeNull();
+  });
+  it('accepts the user as creator and blocks anyone else', () => {
+    expect(() => guardTx(tx(call(PROGRAMS.pump, createV2(creator))), o)).not.toThrow();
+    expect(() => guardTx(tx(call(PROGRAMS.pump, createV2(Keypair.generate().publicKey))), o)).toThrow(/creator fees/);
+  });
+});
+
 describe('checkEffects (simulated balance changes)', () => {
-  const t = tx(cb, call(PROGRAMS.pump));
-  const sim = (pre: number, post: number, extra: Partial<SimResult> = {}): SimResult => ({ err: null, logs: [], preBalances: [pre, 0], postBalances: [post, 0], ...extra });
+  const t = tx(cb, call(PROGRAMS.pump), sync());
+  const wsolIdx = t.message.staticAccountKeys.findIndex((k) => k.toBase58() === wsolAta(creator.toBase58()));
+  const system = { owner: PROGRAMS.system, lamports: 1 };
+  const sim = (pre: number, post: number, extra: Partial<SimResult> = {}): SimResult => ({ err: null, logs: [], preBalances: [pre, 0], postBalances: [post, 0], accounts: [system], ...extra });
   const o = { creator: creator.toBase58(), maxSpendSol: 0.02 };
 
   it('passes a launch within budget', () => {
@@ -88,10 +112,21 @@ describe('checkEffects (simulated balance changes)', () => {
     expect(checkEffects({ err: null, logs: [] }, t, o)).toBeInstanceOf(GuardError);
   });
 
-  it('fails if any of the creator token balances goes down', () => {
-    const tok = (amount: string) => [{ accountIndex: 1, mint: mint.toBase58(), owner: creator.toBase58(), uiTokenAmount: { amount } }];
-    expect(checkEffects(sim(1e9, 1e9, { preTokenBalances: tok('100'), postTokenBalances: tok('99') }), t, o)?.message).toMatch(/move tokens/);
-    expect(checkEffects(sim(1e9, 1e9, { preTokenBalances: tok('100'), postTokenBalances: [] }), t, o)?.message).toMatch(/move tokens/);
-    expect(checkEffects(sim(1e9, 1e9, { preTokenBalances: tok('100'), postTokenBalances: tok('150') }), t, o)).toBeNull();
+  it('fails if the wallet stops being a plain system account, or that is unknown', () => {
+    expect(checkEffects(sim(1e9, 1e9, { accounts: [{ owner: Keypair.generate().publicKey.toBase58(), lamports: 1 }] }), t, o)?.message).toMatch(/controls your wallet/);
+    expect(checkEffects(sim(1e9, 1e9, { accounts: undefined }), t, o)).toBeInstanceOf(GuardError);
+  });
+
+  it('never touches tokens the user already holds', () => {
+    const tok = (i: number, amount: string, owner = creator.toBase58()) => [{ accountIndex: i, mint: mint.toBase58(), owner, uiTokenAmount: { amount } }];
+    expect(checkEffects(sim(1e9, 1e9, { preTokenBalances: tok(1, '100'), postTokenBalances: tok(1, '100') }), t, o)?.message).toMatch(/already hold/);
+  });
+
+  it('allows the WSOL account only if nothing leaves it and it stays the user\'s', () => {
+    const tok = (amount: string, owner = creator.toBase58()) => [{ accountIndex: wsolIdx, mint: WSOL.toBase58(), owner, uiTokenAmount: { amount } }];
+    expect(checkEffects(sim(1e9, 1e9, { preTokenBalances: tok('100'), postTokenBalances: tok('100') }), t, o)).toBeNull();
+    expect(checkEffects(sim(1e9, 1e9, { preTokenBalances: tok('100'), postTokenBalances: tok('99') }), t, o)?.message).toMatch(/wrapped SOL/);
+    expect(checkEffects(sim(1e9, 1e9, { preTokenBalances: tok('100'), postTokenBalances: tok('100', Keypair.generate().publicKey.toBase58()) }), t, o)?.message).toMatch(/wrapped SOL/);
+    expect(checkEffects(sim(1e9, 1e9, { preTokenBalances: tok('100'), postTokenBalances: [] }), t, o)?.message).toMatch(/wrapped SOL/);
   });
 });

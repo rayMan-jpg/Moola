@@ -1,11 +1,27 @@
 // Defense in depth: transactions come from third-party builders (PumpPortal, bonk.fun, Jupiter) or a
 // fast-moving SDK. Before the wallet prompt we check, fail-closed:
 //  1. static shape: every top-level instruction is an expected instruction of an expected program,
-//     SOL only moves into the creator's own WSOL account (capped at the dev buy), ATAs are the creator's;
-//  2. effect: a mainnet simulation shows the creator spends at most the expected SOL and no token
-//     balance of theirs goes down. This also catches anything an allowed program might do via CPI.
+//     SOL only moves into the creator's own WSOL account (capped at the dev buy), ATAs are the creator's,
+//     and pump's create_v2 names the user as creator (so fees can't be redirected);
+//  2. effect: a mainnet simulation shows the creator spends at most the expected SOL, their wallet stays a
+//     plain system account, and none of their existing token accounts (except WSOL for a dev buy) is
+//     touched. That bounds what an allowed program could do via CPI to what the simulation can see.
 import { PublicKey, type VersionedTransaction } from '@solana/web3.js';
 import { simulateTx, simError, type SimResult } from '../rpc';
+
+const CREATE_V2 = 'd6904cec5f8b31b4';
+
+/** create_v2 args: name, symbol, uri (borsh strings), then the creator pubkey. */
+export function createV2Creator(data: Uint8Array): string | null {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  let off = 8;
+  for (let i = 0; i < 3; i++) {
+    if (off + 4 > data.length) return null;
+    off += 4 + view.getUint32(off, true);
+  }
+  if (off + 32 > data.length) return null;
+  return new PublicKey(data.subarray(off, off + 32)).toBase58();
+}
 
 export const PROGRAMS = {
   computeBudget: 'ComputeBudget111111111111111111111111111111',
@@ -96,8 +112,12 @@ export function guardTx(tx: VersionedTransaction, o: GuardOptions): void {
         throw abort('launch transaction creates token accounts it should not.');
       }
     } else {
+      const d = hex(data.subarray(0, 8));
       const allowedIx = DISCRIMINATORS[program] ?? [];
-      if (!allowedIx.includes(hex(data.subarray(0, 8)))) throw abort(`launch transaction calls an unexpected ${program.slice(0, 6)}… instruction.`);
+      if (!allowedIx.includes(d)) throw abort(`launch transaction calls an unexpected ${program.slice(0, 6)}… instruction.`);
+      if (program === PROGRAMS.pump && d === CREATE_V2 && createV2Creator(data) !== o.creator) {
+        throw abort('launch transaction names someone else as the coin creator (they would get your creator fees).');
+      }
     }
   }
 }
@@ -114,11 +134,21 @@ export function checkEffects(sim: SimResult, tx: VersionedTransaction, o: SpendC
   if (tx.message.staticAccountKeys[0].toBase58() !== o.creator) return abort('launch transaction has an unexpected fee payer.');
   const spent = (sim.preBalances[0] - sim.postBalances[0]) / 1e9;
   if (spent > o.maxSpendSol) return abort(`launch transaction would take ${spent.toFixed(4)} SOL from you, expected at most ${o.maxSpendSol.toFixed(4)}.`);
+  // The wallet must stay a plain system account (no System::assign to some program).
+  const me = sim.accounts?.[0];
+  if (!me || me.owner !== PROGRAMS.system) return abort('launch transaction would change who controls your wallet.');
+  // A launch creates fresh token accounts; it never needs the user's existing ones (bar WSOL for a dev buy),
+  // and that rules out amount changes as well as silent authority/delegate changes.
+  const keys = [...tx.message.staticAccountKeys.map((k) => k.toBase58()), ...(sim.loadedAddresses?.writable ?? []), ...(sim.loadedAddresses?.readonly ?? [])];
+  const wsol = wsolAta(o.creator);
   const post = new Map((sim.postTokenBalances ?? []).map((b) => [b.accountIndex, b]));
   for (const pre of sim.preTokenBalances ?? []) {
     if (pre.owner !== o.creator) continue;
-    const after = BigInt(post.get(pre.accountIndex)?.uiTokenAmount.amount ?? '0');
-    if (after < BigInt(pre.uiTokenAmount.amount)) return abort(`launch transaction would move tokens (${pre.mint.slice(0, 6)}…) out of your wallet.`);
+    const after = post.get(pre.accountIndex);
+    if (keys[pre.accountIndex] !== wsol) return abort(`launch transaction touches tokens you already hold (${pre.mint.slice(0, 6)}…).`);
+    if (!after || after.owner !== o.creator || BigInt(after.uiTokenAmount.amount) < BigInt(pre.uiTokenAmount.amount)) {
+      return abort('launch transaction would move wrapped SOL out of your wallet.');
+    }
   }
   return null;
 }
@@ -128,7 +158,7 @@ export function checkEffects(sim: SimResult, tx: VersionedTransaction, o: SpendC
  * GuardError, or a simulation failure. An RPC outage is not treated as a pass.
  */
 export async function preflight(tx: VersionedTransaction, o: SpendCheck): Promise<void> {
-  const sim = await simulateTx(tx.serialize());
+  const sim = await simulateTx(tx.serialize(), [o.creator]);
   const failed = simError(sim);
   if (failed) throw failed;
   const bad = checkEffects(sim, tx, o);
