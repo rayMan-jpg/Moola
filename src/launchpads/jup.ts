@@ -7,6 +7,7 @@ import type { Launchpad, LaunchInput, PreparedLaunch, PrepareContext, StepId } f
 import { fitImage } from '../metadata';
 import { simulateTx, simError, toBase64 } from '../rpc';
 import { txSignature } from '../wallet';
+import { guardTx, PROGRAMS } from './guard';
 
 export const STUDIO_API = 'https://api.jup.ag/studio/v1';
 const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -103,6 +104,7 @@ export const jup: Launchpad = {
     const mint = String(res.mint ?? '');
     const tx = VersionedTransaction.deserialize(fromBase64(String(res.transaction ?? '')));
     assertStudioTx(tx, input.creator, mint);
+    guardTx(tx, { creator: input.creator, allow: [PROGRAMS.dbc, PROGRAMS.jupStudio] });
     const sim = await simulateTx(tx.serialize()).catch(() => null);
     const err = sim && simError(sim);
     if (err) throw err;

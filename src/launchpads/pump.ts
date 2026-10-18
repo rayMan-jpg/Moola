@@ -3,12 +3,16 @@ import type { Keypair, VersionedTransaction } from '@solana/web3.js';
 import { uploadMetadata } from '../metadata';
 import { buildCreateTx, assertTx } from './pumpportal';
 import { rpcUrls, simulateTx, simError } from '../rpc';
+import { guardTx, PROGRAMS } from './guard';
 
 type Built = { tx: VersionedTransaction; mint: Keypair; via: string };
 
 /** Simulate before the wallet popup; returns null if OK, the error otherwise. */
 async function check(b: Built, creator: string): Promise<Error | null> {
   assertTx(b.tx, creator, b.mint.publicKey.toBase58());
+  const allow: string[] = [PROGRAMS.pump, PROGRAMS.ata];
+  if (b.via === 'pumpportal') allow.push(PROGRAMS.pumpPortalProxy);
+  guardTx(b.tx, { creator, allow });
   try {
     return simError(await simulateTx(b.tx.serialize()));
   } catch {
@@ -50,7 +54,12 @@ export const pump: Launchpad = {
         lastErr = e as Error;
         continue;
       }
-      const err = await check(built, input.creator);
+      let err: Error | null;
+      try {
+        err = await check(built, input.creator);
+      } catch (e) {
+        err = e as Error; // guard rejection: try the next builder
+      }
       if (!err) {
         const mint = built.mint.publicKey.toBase58();
         return { mint, tx: built.tx, coinUrl: `https://pump.fun/coin/${mint}`, via: built.via };
