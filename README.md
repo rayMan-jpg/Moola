@@ -20,7 +20,23 @@ The logo is drawn on a canvas (no upload needed), metadata is pinned for you, th
 built against the launchpad's own on-chain program, and your wallet signs it. MOOLA has no backend
 and never sees keys or funds.
 
-<!-- LAUNCHPADS -->
+## Launchpads
+
+| Launchpad | How MOOLA builds the launch | Wallet prompts | Dev buy | Approx. cost |
+| --- | --- | --- | --- | --- |
+| **pump.fun** (default, ~97% of Solana launches) | Official `@pump-fun/pump-sdk` `create_v2` (+ `buy_v2`) built in the browser; PumpPortal's builder as fallback | 1 | yes | ~0.006 SOL + dev buy |
+| **Jupiter Studio** | Jupiter's keyless Studio API (Meteora DBC, USDC curve, "Meme" preset); Jupiter broadcasts and publishes the metadata | 2 (auth message + tx) | no | ~0.028 SOL |
+| **Bonk.fun** | bonk.fun's own `createMint` builder (Raydium LaunchLab, vanity `...bonk` mint) | 1 | yes | ~0.021 SOL + dev buy |
+
+Logo + metadata are pinned to Arweave through ArDrive Turbo's free tier using a throwaway signing key,
+so there's no API key, account or extra wallet prompt. Every transaction is checked before the wallet
+sees it: right fee payer and signers, a per-launchpad **program allowlist** (`src/launchpads/guard.ts`),
+and a mainnet simulation (so empty wallets get "not enough SOL" instead of a failing transaction).
+
+Not integrated: Bags (its API blocks browser origins), StonkFun (closed backend), Believe, Boop,
+Heaven and Moonit (inactive as of Oct 2026).
+
+Human test checklist: [`HUMAN_TEST.md`](HUMAN_TEST.md).
 
 ## Repo layout
 
@@ -32,7 +48,7 @@ and never sees keys or funds.
 | `scripts/sync-ecc.sh` | Re-sync the fork from upstream ECC. |
 | `src/` | The site: catalog browser (degen dashboard), launcher, wallet layer, launchpad adapters. |
 | `tests/unit` | Vitest unit tests. |
-| `tests/sim` | Mainnet *simulation* tests: build real launch transactions and run `simulateTransaction` with a funded payer and `sigVerify:false`. Nothing is broadcast. |
+| `tests/live` | Mainnet *simulation* tests: real uploads and real builder transactions, run through `simulateTransaction` with a funded payer and `sigVerify:false`. Nothing is broadcast. |
 | `tests/e2e` | Playwright end-to-end tests with a mock Wallet Standard wallet that simulates instead of sending. |
 
 ## Develop
@@ -45,7 +61,7 @@ npm run test:sim   # live mainnet simulations (network, no SOL needed)
 npm run build && npm run test:e2e
 ```
 
-Deploys are a static `dist/` pushed to the `gh-pages` branch.
+Deploy: `./scripts/deploy-pages.sh` (builds and force-pushes `dist/` to the `gh-pages` branch).
 
 ## Disclaimer
 
