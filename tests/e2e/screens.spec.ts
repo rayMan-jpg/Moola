@@ -4,7 +4,7 @@ import bs58 from 'bs58';
 import { MOCK_WALLET_SCRIPT } from './mockWallet';
 
 const OUT = process.env.SHOTS_DIR ?? 'test-results/shots';
-const PAYER = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+const PAYER = process.env.SIM_PAYER ?? '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 test.skip(!process.env.SHOTS, 'set SHOTS=1 to capture screenshots');
 
 test('capture states', async ({ page }, info) => {

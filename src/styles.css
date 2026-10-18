@@ -213,7 +213,7 @@ img, canvas { max-width: 100%; display: block; }
 /* ── launcher ─────────────────────────────── */
 .launcher { position: static; }
 /* Sticky only when the whole pad fits on screen; otherwise SEND IT would hide below the fold. */
-@media (min-width: 961px) and (min-height: 1100px) { .launcher { position: sticky; top: 76px; } }
+@media (min-width: 961px) and (min-height: 1100px) { .launcher { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow-y: auto; } }
 #launch, #catalog, #result { scroll-margin-top: 84px; }
 .art { display: grid; grid-template-columns: 132px 1fr; gap: 14px; align-items: center; margin-bottom: 14px; }
 .art canvas, .art img { width: 132px; height: 132px; border: 3px solid var(--ink); border-radius: 14px; box-shadow: 4px 4px 0 var(--pink); background: #222; object-fit: cover; }

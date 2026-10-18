@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { simulateTx, rpc } from '../../src/rpc';
 
 // Big plain system-owned wallets, used only as the fee payer in simulations (sigVerify=false).
-const CANDIDATES = [process.env.SIM_PAYER, '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM', '5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhLu3oc5'].filter(Boolean) as string[];
+const CANDIDATES = [process.env.SIM_PAYER, '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM', 'AC5RDfQFmDS1deWZos921JfqscXdByf8BKHs5ACWjtW2', '2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm'].filter(Boolean) as string[];
 
 export async function fundedPayer(minSol = 100): Promise<string> {
   for (const a of CANDIDATES) {

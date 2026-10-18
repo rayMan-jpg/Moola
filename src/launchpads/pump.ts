@@ -48,7 +48,14 @@ export const pump: Launchpad = {
     const attempts: (() => Promise<Built>)[] = [
       // 1) official SDK, built locally (no third party besides the RPC)
       async () => {
-        const { buildPumpSdkTx } = await import('./pumpSdk');
+        let sdk: typeof import('./pumpSdk');
+        try {
+          sdk = await import('./pumpSdk');
+        } catch {
+          // A deploy replaced the hashed chunk this tab was built against.
+          throw Object.assign(new Error('MOOLA just got an update. refresh the page and hit SEND IT again.'), { friendly: true, stale: true });
+        }
+        const { buildPumpSdkTx } = sdk;
         let lastErr: unknown;
         for (const rpcUrl of rpcUrls()) {
           try {
@@ -68,6 +75,7 @@ export const pump: Launchpad = {
       try {
         built = await attempt();
       } catch (e) {
+        if ((e as { stale?: boolean }).stale) throw e; // reload beats silently switching builders
         lastErr = e as Error;
         continue;
       }

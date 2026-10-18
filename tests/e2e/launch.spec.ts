@@ -268,6 +268,19 @@ test('sticky SEND IT bar appears when the real button is off screen and launches
   expect(ctx.sims[0].err).toBeNull();
 });
 
+test('rule-set coins get a deep link that resolves', async ({ page }) => {
+  await setup(page);
+  await page.goto('./');
+  await expect(page.locator('#grid .card').first()).toBeVisible();
+  await page.getByRole('button', { name: /^Rules/ }).click();
+  await page.locator('#grid .card').first().getByRole('button', { name: /^Meme / }).click();
+  const hash = new URL(page.url()).hash;
+  expect(hash).toMatch(/^#\/rule\/.+-rules$/);
+  const ticker = await page.locator('#ticker').inputValue();
+  await page.goto('./' + hash);
+  await expect(page.locator('#ticker')).toHaveValue(ticker);
+});
+
 test('deep link pre-fills the coin for an agent', async ({ page }) => {
   await setup(page);
   await page.goto('./#/agent/planner');

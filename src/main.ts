@@ -95,7 +95,10 @@ function setInert(on: boolean) {
 
 let lastFocus: HTMLElement | null = null;
 function openModal(title: string, html: string) {
-  if ($('modal').hidden) lastFocus = document.activeElement as HTMLElement;
+  if ($('modal').hidden) {
+    const a = document.activeElement as HTMLElement | null;
+    lastFocus = !a || a === document.body ? els.send : a;
+  }
   $('modal-title').textContent = title;
   $('modal-content').innerHTML = html;
   $('modal').hidden = false;
@@ -108,7 +111,8 @@ function hideModal() {
   setInert(false);
   const back = lastFocus;
   setTimeout(() => {
-    const target = back && back.isConnected && !(back as HTMLButtonElement).disabled ? back : els.name;
+    // :disabled also covers controls inside the disabled fieldset during a launch.
+    const target = back && back.isConnected && !back.matches(':disabled') ? back : els.name;
     target.focus({ preventScroll: true });
   }, 0);
 }
@@ -418,7 +422,10 @@ function restoreDraft(): boolean {
   history.replaceState(null, '', u.toString());
   const d = decodeDraft(raw);
   if (!d) return false;
-  if (d.i) state.item = items(d.i[0] === 'agent' ? 'agent' : d.i[0] === 'command' ? 'command' : 'skill').find((x) => x.id === d.i![1]) ?? null;
+  if (d.i) {
+    const kind = (['agent', 'skill', 'command', 'rule'] as TabId[]).find((k) => k === d.i![0]);
+    state.item = kind ? items(kind).find((x) => x.id === d.i![1]) ?? null : null;
+  }
   state.reroll = d.r || 0;
   els.name.value = d.n.slice(0, 64);
   els.ticker.value = sanitizeTicker(d.t);
@@ -790,7 +797,7 @@ els.sendBarBtn.addEventListener('click', () => {
 function items(tab: TabId): CatalogItem[] {
   const c = state.catalog;
   if (!c) return [];
-  if (tab === 'rule') return c.rules.map((r) => ({ kind: 'skill', id: `${r.l}-rules`, title: `${r.l}-rules`, description: `${r.f.length} rule files: ${r.f.join(', ')}.` }));
+  if (tab === 'rule') return c.rules.map((r) => ({ kind: 'rule', id: `${r.l}-rules`, title: `${r.l}-rules`, description: `${r.f.length} rule files: ${r.f.join(', ')}.` }));
   const raw = tab === 'agent' ? c.agents : tab === 'skill' ? c.skills : c.commands;
   return raw.map((r) => ({ kind: r.k, id: r.id, title: r.n, description: r.d }));
 }
@@ -845,7 +852,7 @@ function renderGrid() {
           return `<article class="card">
           <div class="card__top">
             <div class="card__emoji" aria-hidden="true">${c.emoji}</div>
-            <div><div class="kind">${i.kind === 'skill' && state.tab === 'rule' ? 'rule set' : i.kind}</div><h3 class="card__title">${esc(i.title)}</h3><div class="card__ticker">$${esc(c.ticker)}</div></div>
+            <div><div class="kind">${i.kind === 'rule' ? 'rule set' : i.kind}</div><h3 class="card__title">${esc(i.title)}</h3><div class="card__ticker">$${esc(c.ticker)}</div></div>
           </div>
           <p class="card__desc">${esc(i.description || 'no lore yet. you write it.')}</p>
           <div class="card__actions">
@@ -915,7 +922,7 @@ function renderStatsAndMarquee() {
 }
 
 function routeFromHash() {
-  const m = location.hash.match(/^#\/(agent|skill|command)\/(.+)$/);
+  const m = location.hash.match(/^#\/(agent|skill|command|rule)\/(.+)$/);
   if (!m || !state.catalog) return false;
   const id = decodeURIComponent(m[2]);
   const tab = m[1] as TabId;
@@ -986,6 +993,8 @@ async function boot() {
     const first = items('agent').find((i) => i.id === 'code-reviewer') ?? items('agent')[0];
     if (first && !state.dirty && !restored) fillFromItem(first, 0, false);
   }
+  // Warm the pump.fun SDK chunk so the first launch doesn't wait on it.
+  setTimeout(() => import('./launchpads/pumpSdk').catch(() => undefined), 1500);
   // Silent reconnect, only to the wallet this browser used last (never pops a prompt on load).
   let last = '';
   try {

@@ -2,7 +2,7 @@
 import { hashSeed, rng } from './coinArt';
 
 export interface CatalogItem {
-  kind: 'agent' | 'skill' | 'command';
+  kind: 'agent' | 'skill' | 'command' | 'rule';
   id: string;
   title: string;
   description: string;
