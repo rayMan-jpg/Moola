@@ -1,4 +1,4 @@
-import type { Launchpad, LaunchInput, PreparedLaunch, StepId } from './types';
+import type { Launchpad, LaunchInput, PreparedLaunch, PrepareContext, StepId } from './types';
 import type { Keypair, VersionedTransaction } from '@solana/web3.js';
 import { uploadMetadata } from '../metadata';
 import { buildCreateTx, assertTx } from './pumpportal';
@@ -22,8 +22,11 @@ export const pump: Launchpad = {
   tagline: 'the OG casino',
   badge: 'MOST APED',
   costHint: '~0.006 SOL rent + network fee, no launch fee',
+  signatures: 1,
+  devBuy: true,
   overheadSol: 0.01,
-  async prepare(input: LaunchInput, onStep: (s: StepId) => void, fetchImpl: typeof fetch = fetch): Promise<PreparedLaunch> {
+  async prepare(input: LaunchInput, onStep: (s: StepId) => void, ctx: PrepareContext = {}): Promise<PreparedLaunch> {
+    const fetchImpl = ctx.fetchImpl ?? fetch;
     onStep('upload');
     const { uri } = await uploadMetadata(input, { createdOn: 'https://pump.fun' }, fetchImpl);
 

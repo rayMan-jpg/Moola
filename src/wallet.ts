@@ -102,6 +102,21 @@ export async function signOnly(c: Connected, tx: VersionedTransaction): Promise<
   return out.signedTransaction;
 }
 
+const SIGN_MESSAGE = 'solana:signMessage';
+
+export function canSignMessage(c: Connected): boolean {
+  return SIGN_MESSAGE in (c.wallet.features as Feature);
+}
+
+export async function signMessage(c: Connected, message: Uint8Array): Promise<Uint8Array> {
+  const feature = (c.wallet.features as Feature)[SIGN_MESSAGE] as
+    | { signMessage: (...inputs: unknown[]) => Promise<readonly { signature: Uint8Array }[]> }
+    | undefined;
+  if (!feature) throw new Error(`${c.wallet.name} cannot sign messages. Use Phantom, Solflare or Backpack for this launchpad.`);
+  const [out] = await feature.signMessage({ account: c.account, message });
+  return out.signature;
+}
+
 export function canSignOnly(c: Connected): boolean {
   return SIGN in (c.wallet.features as Feature);
 }

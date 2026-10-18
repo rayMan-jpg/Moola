@@ -6,10 +6,14 @@ export const MOCK_WALLET_SCRIPT = ({ address, publicKey }: { address: string; pu
     address,
     publicKey: new Uint8Array(publicKey),
     chains: ['solana:mainnet'],
-    features: ['solana:signAndSendTransaction', 'solana:signTransaction'],
+    features: ['solana:signAndSendTransaction', 'solana:signTransaction', 'solana:signMessage'],
   };
   const listeners: Record<string, ((...a: unknown[]) => void)[]> = {};
-  const w = window as unknown as { __mockSend: (tx: number[]) => Promise<number[]>; __mockSign: (tx: number[]) => Promise<number[]> };
+  const w = window as unknown as {
+    __mockSend: (tx: number[]) => Promise<number[]>;
+    __mockSign: (tx: number[]) => Promise<number[]>;
+    __mockSignMessage: (m: number[]) => Promise<number[]>;
+  };
   const wallet = {
     version: '1.0.0',
     name: 'Mock Degen Wallet',
@@ -40,6 +44,13 @@ export const MOCK_WALLET_SCRIPT = ({ address, publicKey }: { address: string; pu
         signAndSendTransaction: async (...inputs: { transaction: Uint8Array }[]) => {
           const sig = await w.__mockSend(Array.from(inputs[0].transaction));
           return [{ signature: new Uint8Array(sig) }];
+        },
+      },
+      'solana:signMessage': {
+        version: '1.0.0',
+        signMessage: async (...inputs: { message: Uint8Array }[]) => {
+          const sig = await w.__mockSignMessage(Array.from(inputs[0].message));
+          return [{ signedMessage: inputs[0].message, signature: new Uint8Array(sig) }];
         },
       },
       'solana:signTransaction': {

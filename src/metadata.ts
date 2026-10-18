@@ -2,9 +2,10 @@
 import { turboUpload, TURBO_MAX_PAYLOAD } from './turbo';
 import type { LaunchInput } from './launchpads/types';
 
-/** Re-encode any image to fit the free upload limit. Animated GIFs become a still frame. */
-export async function fitImage(blob: Blob, maxBytes = TURBO_MAX_PAYLOAD): Promise<{ bytes: Uint8Array; type: string }> {
-  if (blob.size <= maxBytes && /^image\/(jpeg|png|webp|gif)$/.test(blob.type)) {
+/** Re-encode any image to fit the size limit. Animated GIFs become a still frame when not allowed. */
+export async function fitImage(blob: Blob, maxBytes = TURBO_MAX_PAYLOAD, allowGif = true): Promise<{ bytes: Uint8Array; type: string }> {
+  const ok = allowGif ? /^image\/(jpeg|png|webp|gif)$/ : /^image\/(jpeg|png|webp)$/;
+  if (blob.size <= maxBytes && ok.test(blob.type)) {
     return { bytes: new Uint8Array(await blob.arrayBuffer()), type: blob.type };
   }
   const bmp = await createImageBitmap(blob);

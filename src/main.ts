@@ -5,7 +5,7 @@ import type { Wallet } from '@wallet-standard/base';
 import { VersionedTransaction } from '@solana/web3.js';
 import { coinify, validateDraft, sanitizeTicker, emojiFor, NAME_MAX, DESC_MAX, type CatalogItem } from './coinify';
 import { drawCoinArt, canvasToBlob } from './coinArt';
-import { listWallets, onWalletsChanged, connect, disconnect, signAndSend, signOnly, canSignOnly, txSignature, isMobile, walletDeeplinks, shortAddr, type Connected } from './wallet';
+import { listWallets, onWalletsChanged, connect, disconnect, signAndSend, signOnly, canSignOnly, canSignMessage, signMessage, txSignature, isMobile, walletDeeplinks, shortAddr, type Connected } from './wallet';
 import { getBalanceSol, sendRaw, waitForSignature, setCustomRpc, rpcUrls } from './rpc';
 import { LAUNCHPADS, padById } from './launchpads';
 import type { StepId } from './launchpads/types';
@@ -200,6 +200,7 @@ function renderPads() {
       ${p.badge ? `<span class="pad__badge">${esc(p.badge)}</span>` : ''}
       <span class="pad__name">${esc(p.name)}</span>
       <span class="pad__meta">${esc(p.tagline)}</span>
+      <span class="pad__meta mono">${p.signatures} signature${p.signatures > 1 ? 's' : ''}${p.devBuy ? '' : ' · no dev buy'}</span>
     </button>`,
   ).join('');
 }
@@ -208,6 +209,7 @@ $('pads').addEventListener('click', (e) => {
   if (!b) return;
   state.pad = b.dataset.pad!;
   renderPads();
+  renderBuys();
   updateSummary();
 });
 $('pads').addEventListener('keydown', (e) => {
@@ -217,15 +219,24 @@ $('pads').addEventListener('keydown', (e) => {
   const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1;
   state.pad = LAUNCHPADS[(i + d + LAUNCHPADS.length) % LAUNCHPADS.length].id;
   renderPads();
+  renderBuys();
   updateSummary();
   ($('pads').querySelector(`[data-pad="${state.pad}"]`) as HTMLElement).focus();
 });
 
 const BUYS = [0, 0.1, 0.5, 1];
 function renderBuys() {
+  const pad = padById(state.pad);
+  const off = pad.devBuy ? '' : ' disabled';
+  const buy = effectiveDevBuy();
   $('buy-chips').innerHTML =
-    BUYS.map((v) => `<button type="button" class="chip" aria-pressed="${state.devBuy === v}" data-buy="${v}">${v === 0 ? 'none' : v}</button>`).join('') +
-    `<input class="chip-input" id="buy-custom" type="number" min="0" max="85" step="0.01" inputmode="decimal" placeholder="custom" aria-label="Custom dev buy in SOL" value="${BUYS.includes(state.devBuy) ? '' : state.devBuy}" />`;
+    BUYS.map((v) => `<button type="button" class="chip" aria-pressed="${buy === v}" data-buy="${v}"${off}>${v === 0 ? 'none' : v}</button>`).join('') +
+    `<input class="chip-input" id="buy-custom" type="number" min="0" max="85" step="0.01" inputmode="decimal" placeholder="custom" aria-label="Custom dev buy in SOL" value="${BUYS.includes(state.devBuy) ? '' : state.devBuy}"${off} />` +
+    (pad.devBuy ? '' : `<span class="art__hint">${esc(pad.name)} has no dev buy at launch. ape your own coin right after.</span>`);
+}
+
+function effectiveDevBuy(): number {
+  return padById(state.pad).devBuy ? state.devBuy : 0;
 }
 $('buy-chips').addEventListener('click', (e) => {
   const b = (e.target as HTMLElement).closest<HTMLElement>('[data-buy]');
@@ -246,7 +257,9 @@ $('buy-chips').addEventListener('input', (e) => {
 function updateSummary() {
   const pad = padById(state.pad);
   const t = els.ticker.value || '???';
-  const buy = state.devBuy > 0 ? `<b>${state.devBuy} SOL</b> dev buy + ` : 'no dev buy, ';
+  const devBuy = effectiveDevBuy();
+  const buy = devBuy > 0 ? `<b>${devBuy} SOL</b> dev buy + ` : 'no dev buy, ';
+  renderStepLabels();
   $('summary').innerHTML = `Launching <b>$${esc(t)}</b> on <b>${esc(pad.name)}</b>: ${buy}${esc(pad.costHint)}.`;
   els.send.textContent = state.wallet ? `SEND IT ($${t})` : 'CONNECT + SEND IT';
 }
@@ -356,6 +369,17 @@ onWalletsChanged(() => {
 });
 
 // ── launch ──
+const DEFAULT_STEP_LABELS: Record<StepId, string> = {
+  upload: 'Pinning meme + metadata to Arweave',
+  build: 'Cooking the transaction',
+  sign: 'Sign in your wallet',
+  confirm: 'Waiting for the chain',
+};
+function renderStepLabels() {
+  const labels = { ...DEFAULT_STEP_LABELS, ...padById(state.pad).stepLabels };
+  els.steps.querySelectorAll<HTMLElement>('li').forEach((li) => (li.textContent = labels[li.dataset.step as StepId]));
+}
+
 function setStep(step: StepId | null, mode: 'active' | 'error' = 'active') {
   const order: StepId[] = ['upload', 'build', 'sign', 'confirm'];
   const idx = step ? order.indexOf(step) : -1;
@@ -396,7 +420,7 @@ els.form.addEventListener('submit', async (e) => {
     // Cheap pre-flight so people with an empty wallet don't upload + sign for nothing.
     try {
       const bal = await getBalanceSol(wallet.address);
-      const need = state.devBuy + pad.overheadSol;
+      const need = effectiveDevBuy() + pad.overheadSol;
       if (bal < need) throw Object.assign(new Error(`need ~${need.toFixed(3)} SOL, wallet has ${bal.toFixed(3)} SOL. top up ser.`), { friendly: true });
     } catch (err) {
       if ((err as { friendly?: boolean }).friendly) throw err;
@@ -409,30 +433,37 @@ els.form.addEventListener('submit', async (e) => {
         twitter: els.twitter.value.trim() || undefined,
         telegram: els.telegram.value.trim() || undefined,
         website: els.website.value.trim() || undefined,
-        devBuySol: state.devBuy,
+        devBuySol: effectiveDevBuy(),
         creator: wallet.address,
       },
       onStep,
+      { signMessage: canSignMessage(wallet) ? (m) => signMessage(wallet, m) : undefined },
     );
     onStep('sign');
     let sig: string;
     let rebroadcast: (() => Promise<unknown>) | undefined;
-    if (prepared.submit) {
-      sig = await prepared.submit(await signOnly(wallet, prepared.tx));
-    } else if (canSignOnly(wallet)) {
-      // Same pattern pump.fun's own site uses: the wallet signs a tx the mint already signed, we broadcast.
+    if (canSignOnly(wallet)) {
+      // Same pattern pump.fun's own site uses: the wallet signs a tx the mint already signed, then we
+      // (or the launchpad's API) broadcast it.
       const signed = await signOnly(wallet, prepared.tx);
       if (messageChanged(prepared.tx, signed)) {
         throw new Error(`${wallet.wallet.name} changed the transaction while signing, which breaks the mint signature. Nothing was sent. Try again or use another wallet.`);
       }
-      sig = txSignature(signed);
-      rebroadcast = () => sendRaw(signed);
-      try {
-        await sendRaw(signed);
-      } catch (e) {
-        // Network blips get retried by the rebroadcast loop; real rejections (bad signature, expired) surface now.
-        if (!/fetch|network|RPC 5\d\d|429/i.test(String((e as Error).message))) throw e;
+      if (prepared.submit) {
+        onStep('confirm');
+        sig = await prepared.submit(signed);
+      } else {
+        sig = txSignature(signed);
+        rebroadcast = () => sendRaw(signed);
+        try {
+          await sendRaw(signed);
+        } catch (e) {
+          // Network blips get retried by the rebroadcast loop; real rejections (bad signature, expired) surface now.
+          if (!/fetch|network|RPC 5\d\d|429/i.test(String((e as Error).message))) throw e;
+        }
       }
+    } else if (prepared.submit) {
+      throw new Error(`${wallet.wallet.name} can only sign-and-send, but ${pad.name} needs to submit the signed transaction itself. Use Phantom, Solflare or Backpack.`);
     } else {
       sig = await signAndSend(wallet, prepared.tx, sendRaw);
     }
@@ -468,7 +499,7 @@ function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: str
   } catch {
     /* ignore */
   }
-  const share = encodeURIComponent(`just launched $${r.ticker} on ${r.pad} in one click with MOOLA 🚀\n${r.coinUrl}`);
+  const share = encodeURIComponent(`just launched $${r.ticker} on ${r.pad} with MOOLA 🚀\n${r.coinUrl}`);
   els.form.hidden = true;
   els.result.hidden = false;
   els.result.dataset.via = r.via ?? '';

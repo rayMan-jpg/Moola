@@ -30,15 +30,27 @@ export interface PreparedLaunch {
   submit?: (signed: Uint8Array) => Promise<string>;
 }
 
+export interface PrepareContext {
+  fetchImpl?: typeof fetch;
+  /** Wallet message signing, for launchpads whose API wants proof of wallet ownership. */
+  signMessage?: (message: Uint8Array) => Promise<Uint8Array>;
+}
+
 export interface Launchpad {
   id: string;
   name: string;
   tagline: string;
+  /** Wallet prompts the user will see. */
+  signatures: 1 | 2;
+  /** Whether a creator buy can ride along in the launch transaction. */
+  devBuy: boolean;
+  /** Overrides for the progress step labels. */
+  stepLabels?: Partial<Record<StepId, string>>;
   /** Short human hint about what the launch costs on top of the dev buy. */
   costHint: string;
   badge?: string;
   /** Rough lamports the creator needs beyond the dev buy (rent + fees), for the balance check. */
   overheadSol: number;
   minDevBuySol?: number;
-  prepare(input: LaunchInput, onStep: (s: StepId) => void, fetchImpl?: typeof fetch): Promise<PreparedLaunch>;
+  prepare(input: LaunchInput, onStep: (s: StepId) => void, ctx?: PrepareContext): Promise<PreparedLaunch>;
 }

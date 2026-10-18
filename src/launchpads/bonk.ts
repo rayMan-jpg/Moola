@@ -2,7 +2,7 @@
 // returns a v0 transaction already signed by a fresh "...bonk" vanity mint; the wallet adds the payer
 // signature. The message must not be modified afterwards, and should be signed within ~60s.
 import { VersionedTransaction } from '@solana/web3.js';
-import type { Launchpad, LaunchInput, PreparedLaunch, StepId } from './types';
+import type { Launchpad, LaunchInput, PreparedLaunch, PrepareContext, StepId } from './types';
 import { uploadMetadata } from '../metadata';
 import { assertTx } from './pumpportal';
 import { simulateTx, simError } from '../rpc';
@@ -41,8 +41,11 @@ export const bonk: Launchpad = {
   name: 'Bonk.fun',
   tagline: 'dog szn on Raydium',
   costHint: '~0.021 SOL rent + Metaplex fee',
+  signatures: 1,
+  devBuy: true,
   overheadSol: 0.025,
-  async prepare(input: LaunchInput, onStep: (s: StepId) => void, fetchImpl: typeof fetch = fetch): Promise<PreparedLaunch> {
+  async prepare(input: LaunchInput, onStep: (s: StepId) => void, ctx: PrepareContext = {}): Promise<PreparedLaunch> {
+    const fetchImpl = ctx.fetchImpl ?? fetch;
     onStep('upload');
     const { uri } = await uploadMetadata(input, { createdOn: 'https://bonk.fun' }, fetchImpl);
 
