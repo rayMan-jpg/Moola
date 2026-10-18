@@ -1,11 +1,20 @@
 import type { Launchpad, LaunchInput, PreparedLaunch, PrepareContext, StepId } from './types';
-import type { Keypair, VersionedTransaction } from '@solana/web3.js';
+import { VersionedTransaction, type Keypair } from '@solana/web3.js';
 import { uploadMetadata } from '../metadata';
 import { buildCreateTx, assertTx } from './pumpportal';
 import { rpcUrls, simulateTx, simError } from '../rpc';
 import { guardTx, PROGRAMS } from './guard';
 
 type Built = { tx: VersionedTransaction; mint: Keypair; via: string };
+
+/** Re-sign the mint slot of a wallet-signed transaction (needed if the wallet edited the message). */
+export function resignWith(mint: Keypair): (signed: Uint8Array) => Uint8Array {
+  return (signed) => {
+    const t = VersionedTransaction.deserialize(signed);
+    t.sign([mint]);
+    return t.serialize();
+  };
+}
 
 /** Simulate before the wallet popup; returns null if OK, the error otherwise. */
 async function check(b: Built, creator: string): Promise<Error | null> {
@@ -62,7 +71,7 @@ export const pump: Launchpad = {
       }
       if (!err) {
         const mint = built.mint.publicKey.toBase58();
-        return { mint, tx: built.tx, coinUrl: `https://pump.fun/coin/${mint}`, via: built.via };
+        return { mint, tx: built.tx, coinUrl: `https://pump.fun/coin/${mint}`, via: built.via, resign: resignWith(built.mint) };
       }
       if ((err as { funds?: boolean }).funds) throw err; // no builder can fix an empty wallet
       lastErr = err;

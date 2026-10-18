@@ -18,4 +18,5 @@ for d in "$SRC"/skills/*/; do
 done
 cp "$SRC/scripts/dashboard-web.js" "$DST/upstream/dashboard-web.js"
 sed -i -E "s/pinned at commit \`[0-9a-f]+\` \(ECC v[^)]*\)/pinned at commit \`$(git -C "$SRC" rev-parse HEAD)\` (ECC v$(cat "$SRC/VERSION"))/" "$DST/UPSTREAM.md"
+node "$ROOT/scripts/stub-non-mit.mjs"
 node "$ROOT/scripts/build-catalog.mjs"

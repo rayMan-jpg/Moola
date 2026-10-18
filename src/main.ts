@@ -12,7 +12,7 @@ import type { StepId } from './launchpads/types';
 import { friendlyError } from './errors';
 
 // ── catalog types (shape produced by scripts/build-catalog.mjs) ──
-interface RawItem { k: 'agent' | 'skill' | 'command'; id: string; n: string; d: string; b: string; m?: string; t?: string[]; g?: string; c?: string }
+interface RawItem { k: 'agent' | 'skill' | 'command'; id: string; n: string; d: string; b: string; m?: string; t?: string[]; g?: string; c?: string; lic?: string; src?: string }
 interface Catalog { version: string; agents: RawItem[]; skills: RawItem[]; commands: RawItem[]; rules: { l: string; f: string[] }[]; mcps: { f: string; s: { n: string }[] }[]; hooks: { ev: string; m: string; id: string; d: string }[] }
 type TabId = 'agent' | 'skill' | 'command' | 'rule';
 
@@ -445,9 +445,14 @@ els.form.addEventListener('submit', async (e) => {
     if (canSignOnly(wallet)) {
       // Same pattern pump.fun's own site uses: the wallet signs a tx the mint already signed, then we
       // (or the launchpad's API) broadcast it.
-      const signed = await signOnly(wallet, prepared.tx);
+      let signed = await signOnly(wallet, prepared.tx);
       if (messageChanged(prepared.tx, signed)) {
-        throw new Error(`${wallet.wallet.name} changed the transaction while signing, which breaks the mint signature. Nothing was sent. Try again or use another wallet.`);
+        // Some wallets append their own instructions (e.g. guard assertions). That voids signatures made
+        // before signing; we can redo ours when we hold the key, otherwise nothing is sent.
+        if (!prepared.resign) {
+          throw new Error(`${wallet.wallet.name} changed the transaction while signing, which breaks ${pad.name}'s signature. Nothing was sent. Try again or use another wallet.`);
+        }
+        signed = prepared.resign(signed);
       }
       if (prepared.submit) {
         onStep('confirm');
@@ -619,7 +624,11 @@ $('grid').addEventListener('click', (e) => {
     const meta = [r.m && `model: ${r.m}`, r.t?.length && `tools: ${r.t.join(', ')}`, r.c && `category: ${r.c}`].filter(Boolean).join(' · ');
     openModal(
       r.n.toUpperCase(),
-      `<p>${esc(r.d)}</p>${meta ? `<p class="mono">${esc(meta)}</p>` : ''}<div class="modal__body">${esc(r.b || '')}</div>
+      `<p>${esc(r.d)}</p>${meta ? `<p class="mono">${esc(meta)}</p>` : ''}${
+        r.lic && r.src
+          ? `<p>This one is ${esc(r.lic)} licensed (not MIT), so the full text lives upstream: <a href="${esc(r.src)}" target="_blank" rel="noopener">read it on GitHub</a>.</p>`
+          : `<div class="modal__body">${esc(r.b || '')}</div>`
+      }
        <p style="margin-top:12px"><button class="btn" type="button" id="lore-meme">Meme this one</button></p>`,
     );
     $('lore-meme').addEventListener('click', () => {

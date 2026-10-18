@@ -24,6 +24,11 @@ export interface PreparedLaunch {
   /** Which builder produced the transaction (for diagnostics). */
   via?: string;
   /**
+   * Re-apply our own extra signatures to a wallet-signed transaction. Only possible when we hold
+   * those keys (pump.fun's fresh mint), and lets the launch survive a wallet that edits the message.
+   */
+  resign?: (signed: Uint8Array) => Uint8Array;
+  /**
    * When set, the wallet only signs and this function broadcasts (some launchpads want the
    * signed transaction posted to their API). Otherwise the wallet signs and sends.
    */

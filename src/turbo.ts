@@ -108,6 +108,7 @@ export async function turboUpload(data: Uint8Array, contentType: string, fetchIm
   if (item.length > TURBO_FREE_LIMIT) throw new Error(`file too big for free upload (${item.length} bytes). use a smaller image.`);
   const res = await fetchImpl(TURBO_UPLOAD, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: item as BodyInit });
   const j = (await res.json().catch(() => ({}))) as { id?: string };
+  if (res.status === 402) throw Object.assign(new Error('free metadata upload quota used up for this network (shared IP or VPN?). switch network or try later.'), { friendly: true });
   if (!res.ok) throw new Error(`metadata upload failed (${res.status}). try again in a sec.`);
   if (j.id && j.id !== id) throw new Error('upload service returned an unexpected id');
   return `${TURBO_GATEWAY}/${id}`;

@@ -12,16 +12,26 @@ const OUT = path.join(ROOT, 'public', 'catalog.json');
 const BODY_MAX = { agent: 1200, skill: 800, command: 600 };
 
 export function parseFrontmatter(c) {
-  const m = c.replace(/\r\n/g, '\n').match(/^---\n([\s\S]*?)\n---/);
+  const text = c.replace(/\r\n/g, '\n');
+  const m = text.match(/^---\n([\s\S]*?)\n---/);
   const fm = {};
   if (m) {
-    for (const l of m[1].split('\n')) {
+    const lines = m[1].split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
       const s = l.indexOf(':');
       if (s <= 0 || /^\s/.test(l)) continue;
       const k = l.slice(0, s).trim();
       let v = l.slice(s + 1).trim();
-      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-      if (v.startsWith('[') && v.endsWith(']')) {
+      // YAML block scalars (description: >- / |) continue on the following indented lines.
+      const block = v.match(/^([>|])[-+]?$/);
+      if (block) {
+        const parts = [];
+        while (i + 1 < lines.length && (/^\s+\S/.test(lines[i + 1]) || lines[i + 1] === '')) parts.push(lines[++i].trim());
+        v = block[1] === '>' ? parts.filter(Boolean).join(' ') : parts.join('\n').trim();
+      } else if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+        v = v.slice(1, -1);
+      } else if (v.startsWith('[') && v.endsWith(']')) {
         try {
           v = JSON.parse(v);
         } catch {
@@ -31,8 +41,13 @@ export function parseFrontmatter(c) {
       fm[k] = v;
     }
   }
-  fm._body = c.replace(/\r\n/g, '\n').replace(/^---[\s\S]*?\n---\n*/, '').trim();
+  fm._body = stripBoilerplate(text.replace(/^---[\s\S]*?\n---\n*/, '').trim());
   return fm;
+}
+
+/** ECC prefixes most agents with a "Prompt Defense Baseline" section; it is noise in a lore preview. */
+export function stripBoilerplate(body) {
+  return body.replace(/(^|\n)## Prompt Defense Baseline\n[\s\S]*?(?=\n## |\n# |$)/, '$1').trim();
 }
 
 function read(p) {
@@ -86,7 +101,10 @@ export function loadSkills(root = ECC) {
     .sort()
     .map((id) => {
       const fm = read(path.join(dir, id, 'SKILL.md'));
-      return { k: 'skill', id, n: id, d: String(fm.description || ''), b: clip(fm._body, BODY_MAX.skill) };
+      const lic = String(fm.license || 'MIT');
+      const item = { k: 'skill', id, n: id, d: String(fm.description || ''), b: clip(fm._body, BODY_MAX.skill) };
+      // Non-MIT skills ship as description + link only (see scripts/stub-non-mit.mjs).
+      return /^mit$/i.test(lic) ? item : { ...item, b: '', lic, src: `https://github.com/affaan-m/ECC/tree/main/skills/${id}` };
     });
 }
 

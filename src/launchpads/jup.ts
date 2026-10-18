@@ -5,7 +5,7 @@
 import { VersionedTransaction } from '@solana/web3.js';
 import type { Launchpad, LaunchInput, PreparedLaunch, PrepareContext, StepId } from './types';
 import { fitImage } from '../metadata';
-import { simulateTx, simError, toBase64 } from '../rpc';
+import { simulateTx, simError, toBase64, waitForSignature } from '../rpc';
 import { txSignature } from '../wallet';
 import { guardTx, PROGRAMS } from './guard';
 
@@ -120,8 +120,16 @@ export const jup: Launchpad = {
         form.append('owner', input.creator);
         if (input.description) form.append('content', input.description);
         form.append('headerImage', new Blob([logo.bytes as BlobPart], { type: logo.type }), `logo.${logo.type.split('/')[1]}`);
-        await jupJson(await fetchImpl(`${STUDIO_API}/dbc-pool/submit`, { method: 'POST', body: form }));
-        return txSignature(signed);
+        const sig = txSignature(signed);
+        try {
+          await jupJson(await fetchImpl(`${STUDIO_API}/dbc-pool/submit`, { method: 'POST', body: form }));
+        } catch (e) {
+          // Jupiter's submit errors are opaque; the tx may still have landed. Never let the user
+          // relaunch (new mint = second coin) without checking the chain first.
+          const st = await waitForSignature(sig, { timeoutMs: 25_000 }).catch(() => ({ status: 'timeout' as const }));
+          if (st.status !== 'confirmed') throw e;
+        }
+        return sig;
       },
     };
   },
