@@ -14,7 +14,7 @@ describe('coinify', () => {
     expect(c.ticker).toBe('CODE');
     expect(c.emoji).toBe('🔍');
     expect(c.description).toContain('Expert code review specialist.');
-    expect(c.description).toContain('MOOLA');
+    expect(c.description).toContain('rea4u');
   });
 
   it('every reroll stays valid', () => {

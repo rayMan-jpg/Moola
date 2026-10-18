@@ -42,6 +42,7 @@ interface LegacyProvider {
   connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey?: LegacyKey } | void>;
   disconnect?(): Promise<void>;
   signTransaction?(tx: VersionedTransaction): Promise<VersionedTransaction>;
+  signAllTransactions?(txs: VersionedTransaction[]): Promise<VersionedTransaction[]>;
   signMessage?(message: Uint8Array, display?: string): Promise<{ signature: Uint8Array } | Uint8Array>;
 }
 
@@ -78,8 +79,13 @@ function legacyWallet(name: string, p: LegacyProvider): Wallet {
       version: '1.0.0',
       supportedTransactionVersions: ['legacy', 0],
       signTransaction: async (...inputs: { transaction: Uint8Array }[]) => {
-        const signed = await p.signTransaction!(VersionedTransaction.deserialize(inputs[0].transaction));
-        return [{ signedTransaction: signed.serialize() }];
+        const txs = inputs.map((i) => VersionedTransaction.deserialize(i.transaction));
+        if (txs.length > 1 && p.signAllTransactions) {
+          return (await p.signAllTransactions(txs)).map((t) => ({ signedTransaction: t.serialize() }));
+        }
+        const out: { signedTransaction: Uint8Array }[] = [];
+        for (const t of txs) out.push({ signedTransaction: (await p.signTransaction!(t)).serialize() });
+        return out;
       },
     };
   }
@@ -206,6 +212,21 @@ export async function signOnly(c: Connected, tx: VersionedTransaction): Promise<
   };
   const [out] = await feature.signTransaction({ account: c.account, chain: CHAIN, transaction: tx.serialize() });
   return out.signedTransaction;
+}
+
+/**
+ * Signs several transactions in one wallet prompt (Wallet Standard takes multiple inputs; Phantom,
+ * Solflare and Backpack show a single "approve 2 transactions" screen). Nothing is sent.
+ */
+export async function signMany(c: Connected, txs: VersionedTransaction[]): Promise<Uint8Array[]> {
+  const f = c.wallet.features as Feature;
+  if (!(SIGN in f)) throw new Error(`${c.wallet.name} cannot sign without sending. Try Phantom, Solflare or Backpack.`);
+  const feature = f[SIGN] as {
+    signTransaction: (...inputs: unknown[]) => Promise<readonly { signedTransaction: Uint8Array }[]>;
+  };
+  const out = await feature.signTransaction(...txs.map((tx) => ({ account: c.account, chain: CHAIN, transaction: tx.serialize() })));
+  if (out.length !== txs.length) throw new Error(`${c.wallet.name} returned ${out.length} of ${txs.length} signatures`);
+  return out.map((o) => o.signedTransaction);
 }
 
 export function canSignMessage(c: Connected): boolean {

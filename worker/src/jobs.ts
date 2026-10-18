@@ -434,7 +434,7 @@ export function safeLaunchUrl(pad: PadId, mint: string): string {
     case 'bonk':
       return `https://bonk.fun/token/${mint}`;
     case 'pons':
-      return `https://pons.family/token/${mint}`;
+      return `https://ponsfamily.com/launchpad/${mint.toLowerCase()}`;
     case 'stonk':
       return `https://stonk.broker/token/${mint}`;
   }

@@ -68,10 +68,10 @@ const NAME_TEMPLATES = [
 ];
 
 const DESC_TEMPLATES = [
-  '{D} now it has a ticker. ser this agent works harder than your portfolio. forked from ECC, launched with MOOLA.',
-  '{D} the devs are literally AI agents. wagmi. forked from ECC, launched with MOOLA.',
-  'gm. {D} 1000x engineer, 1000x coin (not financial advice). forked from ECC, launched with MOOLA.',
-  '{D} probably nothing. forked from ECC, launched with MOOLA.',
+  '{D} now it has a ticker. ser this agent works harder than your portfolio. forked from ECC, launched with rea4u.',
+  '{D} the devs are literally AI agents. wagmi. forked from ECC, launched with rea4u.',
+  'gm. {D} 1000x engineer, 1000x coin (not financial advice). forked from ECC, launched with rea4u.',
+  '{D} probably nothing. forked from ECC, launched with rea4u.',
 ];
 
 export function emojiFor(...texts: string[]): string {
@@ -101,7 +101,7 @@ export function tickerFor(id: string): string {
   const meaningful = words.filter((w) => !GENERIC.has(w.toLowerCase()));
   const pool = meaningful.length ? meaningful : words;
   // Prefer a single punchy word; fall back to initials for long multi-word ids.
-  const best = [...pool].sort((a, b) => b.length - a.length)[0] ?? 'MOOLA';
+  const best = [...pool].sort((a, b) => b.length - a.length)[0] ?? "REA4U";
   if (best.length <= TICKER_MAX && best.length >= 3) return sanitizeTicker(best);
   if (pool.length > 1) return sanitizeTicker(pool.map((w) => w[0]).join('') + 'AI');
   return sanitizeTicker(best);

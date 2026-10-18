@@ -11,7 +11,7 @@ export const MOCK_WALLET_SCRIPT = ({ address, publicKey }: { address: string; pu
   const listeners: Record<string, ((...a: unknown[]) => void)[]> = {};
   const w = window as unknown as {
     __mockSend: (tx: number[]) => Promise<number[]>;
-    __mockSign: (tx: number[]) => Promise<number[]>;
+    __mockSign: (txs: number[][]) => Promise<number[][]>;
     __mockSignMessage: (m: number[]) => Promise<number[]>;
   };
   const wallet = {
@@ -56,9 +56,10 @@ export const MOCK_WALLET_SCRIPT = ({ address, publicKey }: { address: string; pu
       'solana:signTransaction': {
         version: '1.0.0',
         supportedTransactionVersions: ['legacy', 0],
+        // One call = one wallet prompt, however many transactions it carries.
         signTransaction: async (...inputs: { transaction: Uint8Array }[]) => {
-          const out = await w.__mockSign(Array.from(inputs[0].transaction));
-          return [{ signedTransaction: new Uint8Array(out) }];
+          const out = await w.__mockSign(inputs.map((i) => Array.from(i.transaction)));
+          return out.map((o) => ({ signedTransaction: new Uint8Array(o) }));
         },
       },
     },
@@ -70,4 +71,37 @@ export const MOCK_WALLET_SCRIPT = ({ address, publicKey }: { address: string; pu
     console.error('mock wallet register failed', e);
   }
   window.addEventListener('wallet-standard:app-ready', (e) => register((e as CustomEvent).detail));
+};
+
+// An EIP-6963 EVM wallet already on Robinhood Chain. Transactions go to the test, which simulates
+// them against the live chain and returns a fake hash; nothing is ever signed or broadcast.
+export const MOCK_EVM_SCRIPT = ({ address }: { address: string }) => {
+  const w = window as unknown as {
+    __mockEvmSend: (tx: Record<string, string>) => Promise<string>;
+    __mockEvmReject?: boolean;
+  };
+  const provider = {
+    request: async ({ method, params }: { method: string; params?: unknown[] }) => {
+      switch (method) {
+        case 'eth_requestAccounts':
+        case 'eth_accounts':
+          return [address];
+        case 'eth_chainId':
+          return '0x1237';
+        case 'wallet_switchEthereumChain':
+        case 'wallet_addEthereumChain':
+          return null;
+        case 'eth_sendTransaction':
+          return w.__mockEvmSend((params as Record<string, string>[])[0]);
+        default:
+          throw Object.assign(new Error(`mock evm wallet: ${method} not supported`), { code: 4200 });
+      }
+    },
+    on: () => {},
+    removeListener: () => {},
+  };
+  const info = { uuid: 'mock-evm', name: 'Mock Hood Wallet', icon: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiMwMGYwZmYiLz48L3N2Zz4=', rdns: 'test.mock.evm' };
+  const announce = () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: Object.freeze({ info, provider }) }));
+  window.addEventListener('eip6963:requestProvider', announce);
+  announce();
 };

@@ -103,7 +103,7 @@ export async function buildDataItem(
 export async function turboUpload(data: Uint8Array, contentType: string, fetchImpl: typeof fetch = fetch): Promise<string> {
   const { item, id } = await buildDataItem(data, [
     { name: 'Content-Type', value: contentType },
-    { name: 'App-Name', value: 'Moola' },
+    { name: 'App-Name', value: 'rea4u' },
   ]);
   if (item.length > TURBO_FREE_LIMIT) throw new Error(`file too big for free upload (${item.length} bytes). use a smaller image.`);
   const res = await fetchImpl(TURBO_UPLOAD, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: item as BodyInit });

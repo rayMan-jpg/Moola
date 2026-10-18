@@ -53,7 +53,7 @@ export const pump: Launchpad = {
           sdk = await import('./pumpSdk');
         } catch {
           // A deploy replaced the hashed chunk this tab was built against.
-          throw Object.assign(new Error('MOOLA just got an update. refresh the page and hit SEND IT again.'), { friendly: true, stale: true });
+          throw Object.assign(new Error('rea4u just got an update. refresh the page and try again (nothing was paid).'), { friendly: true, stale: true });
         }
         const { buildPumpSdkTx } = sdk;
         let lastErr: unknown;

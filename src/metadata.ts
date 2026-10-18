@@ -83,6 +83,12 @@ async function uploadOnce(bytes: Uint8Array, type: string, fetchImpl: typeof fet
   return uri;
 }
 
+/** Uploads just the logo (Robinhood Chain launchpads keep metadata on-chain). Returns its https URL. */
+export async function uploadImage(image: Blob, fetchImpl: typeof fetch = fetch): Promise<string> {
+  const img = await fitImage(image);
+  return uploadOnce(img.bytes, img.type, fetchImpl);
+}
+
 /** Uploads image then metadata. Returns the metadata URI that goes on-chain. */
 export async function uploadMetadata(
   input: LaunchInput,

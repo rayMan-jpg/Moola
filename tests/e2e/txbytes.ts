@@ -45,3 +45,21 @@ export function newKey() {
   const secretKey = ed25519.utils.randomSecretKey();
   return { secretKey, publicKey: ed25519.getPublicKey(secretKey) };
 }
+
+/** Static account keys of a serialized transaction, and how many of them signed. */
+export function staticKeys(tx: Uint8Array): { keys: Uint8Array[]; signers: number } {
+  const { msgStart } = layout(tx);
+  const versioned = (tx[msgStart] & 0x80) !== 0;
+  const headerAt = msgStart + (versioned ? 1 : 0);
+  const signers = tx[headerAt];
+  const [count, sz] = shortVec(tx, headerAt + 3);
+  const start = headerAt + 3 + sz;
+  const keys: Uint8Array[] = [];
+  for (let i = 0; i < count; i++) keys.push(tx.slice(start + 32 * i, start + 32 * (i + 1)));
+  return { keys, signers };
+}
+
+export function signatureOf(tx: Uint8Array): Uint8Array {
+  const { sigStart } = layout(tx);
+  return tx.slice(sigStart, sigStart + 64);
+}
