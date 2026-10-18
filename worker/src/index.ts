@@ -47,6 +47,11 @@ function json(body: unknown, status: number, headers: Record<string, string>): R
 
 // Per-isolate rate limit; Cloudflare's own WAF limits sit in front of this.
 const hits = new Map<string, { n: number; reset: number }>();
+/**
+ * POST /api/jobs, /topup and /token are polled by the client (every ~2.5 s while a payment or launch
+ * confirms, plus retries), so their limit sits well above that.
+ */
+const POLL_LIMIT_PER_MIN = 60;
 function limited(key: string, max: number, windowMs: number): boolean {
   const now = Date.now();
   const h = hits.get(key);
@@ -123,7 +128,7 @@ export async function handle(req: Request, env: Env, o: Overrides = {}): Promise
       return json(r, 200, h);
     }
     if (req.method === 'POST' && path === '/api/jobs') {
-      if (limited(`j:${ip}`, 20, 60_000)) throw new HttpError(429, 'slow down');
+      if (limited(`j:${ip}`, POLL_LIMIT_PER_MIN, 60_000)) throw new HttpError(429, 'slow down');
       return json(await createJob(await body<JobRequest>(req), d), 200, h);
     }
     const m = path.match(/^\/api\/jobs\/(q_[a-z2-7]{16})(\/topup|\/token)?$/);
@@ -134,17 +139,17 @@ export async function handle(req: Request, env: Env, o: Overrides = {}): Promise
         return json(await getJob(id, d), 200, h);
       }
       if (req.method === 'POST' && sub === '/topup') {
-        if (limited(`t:${ip}`, 20, 60_000)) throw new HttpError(429, 'slow down');
+        if (limited(`t:${ip}`, POLL_LIMIT_PER_MIN, 60_000)) throw new HttpError(429, 'slow down');
         return json(await topupJob(id, await body(req), d), 200, h);
       }
       if (req.method === 'POST' && sub === '/token') {
-        if (limited(`k:${ip}`, 20, 60_000)) throw new HttpError(429, 'slow down');
+        if (limited(`k:${ip}`, POLL_LIMIT_PER_MIN, 60_000)) throw new HttpError(429, 'slow down');
         return json(await recordToken(id, await body(req), d), 200, h);
       }
     }
     throw new HttpError(404, 'not found');
   } catch (e) {
-    if (e instanceof HttpError) return json({ error: e.message }, e.status, h);
+    if (e instanceof HttpError) return json(e.code ? { error: e.message, code: e.code } : { error: e.message }, e.status, h);
     console.error('rea4u api error', e);
     return json({ error: 'something broke on our side, try again' }, 500, h);
   }
@@ -154,7 +159,7 @@ export async function sweep(env: Env, o: Overrides = {}): Promise<number> {
   if (configured(env).length) return 0;
   const d = deps(env, o);
   // Free plan: 50 subrequests per invocation; each job sync costs 2-5.
-  const ids = await d.store.activeJobIds(8);
+  const ids = await d.store.activeJobIds(8, (d.now ?? Date.now)());
   for (const id of ids) {
     const job = await d.store.getJob(id);
     if (job) await advance(job, d).catch((e) => console.error('sweep', id, e));

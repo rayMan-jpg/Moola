@@ -1,14 +1,14 @@
 // Job lifecycle: paid -> starting (repo + session) -> running <-> paused (budget) -> done | failed | refused.
-// Every transition is driven by an API call (job POST or status GET) under a short D1 lease,
-// so concurrent pollers can't double-create repos or sessions.
+// Every transition is driven by an API call (job POST or status GET) or the cron sweep, under a
+// short D1 lease. Writes are compare-and-set on the lease token, so a worker whose lease ran out
+// can't overwrite the one that took over.
 
 import {
-  brandClash,
   JOB_ID_RE,
   PAD_CHAIN,
   QUOTE_ID_RE,
   slugify,
-  validateProjectName,
+  validateOrderNames,
   type FeedItem,
   type HostingNeeds,
   type JobRequest,
@@ -20,6 +20,7 @@ import {
 import { createJobEnvironment, startSession, type EngineApi, type EngineEvent } from './engine';
 import type { Env } from './env';
 import { enablePages, ensureRepo, readRepoFile } from './github';
+import { stonkArmed, tokenLaunchedBy } from './launch';
 import { rpcList, SOLANA_RPC_DEFAULT, verifyEvmPayment, verifySolanaPayment, type PayCheck } from './pay';
 import { HttpError, verifyQuote } from './quote';
 import type { JobRecord, Store } from './store';
@@ -30,17 +31,35 @@ export interface Deps {
   engine: EngineApi;
   fetch: typeof fetch;
   now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
-const MAX_START_ATTEMPTS = 5;
+/** Waits between engine start attempts; the last one repeats. */
+const START_BACKOFF_MS = [15_000, 60_000, 5 * 60_000, 15 * 60_000];
+/** A paid job keeps retrying its start this long before it is marked failed. */
+const START_DEADLINE_MS = 60 * 60_000;
 const SYNC_EVERY_MS = 8_000;
 const LEASE_MS = 60_000;
+/** Top-ups and token records try this many times, this far apart, to get the lease from a poller. */
+const LEASE_WAIT_TRIES = 4;
+const LEASE_WAIT_MS = 750;
+/** retries_exhausted: user.message nudges before the session is treated as finished, and the wait after each. */
+const MAX_RESUMES = 3;
+const RESUME_BACKOFF_MS = [30_000, 2 * 60_000];
+const RESUME_TEXT =
+  'Transient upstream errors interrupted your last turn. Continue exactly where you stopped: check the repo state, then carry on with the task and keep rea4u.json and SPEC.md current.';
+/** Syncs that may find a finished session without a manifest before it is finalized without one. */
+const COLLECT_TRIES = 3;
 const FEED_MAX = 25;
+const MANIFEST_MAX = 100_000;
 const SPEC_MAX = 200_000;
 
+/** Thrown when a lease-guarded write finds the lease taken over; the work stops without writing. */
+class LeaseLost extends Error {}
+
+const sleepFor = (d: Deps) => d.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+
 const PADS: PadId[] = ['pump', 'jup', 'bonk', 'pons', 'stonk', 'utoken'];
-const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} .'!&$-]{1,31}$/u;
-const TICKER_RE = /^[A-Z0-9]{2,10}$/;
 
 export function siteUrl(env: Env): string {
   return (env.SITE_URL ?? 'https://rayman-jpg.github.io/Moola/').replace(/\/?$/, '/');
@@ -56,11 +75,18 @@ function checkNeeds(n: HostingNeeds): HostingNeeds {
   return { budget, traffic, customDomain: n?.customDomain === true };
 }
 
-export async function checkPayment(env: Env, q: Quote, tx: string, f: typeof fetch): Promise<PayCheck> {
-  if (q.chain === 'solana') return verifySolanaPayment(tx, q, rpcList(env.SOLANA_RPC, SOLANA_RPC_DEFAULT), f);
+export async function checkPayment(env: Env, q: Quote, tx: string, f: typeof fetch, claimSig?: string): Promise<PayCheck> {
+  const sig = typeof claimSig === 'string' && claimSig.length <= 300 ? claimSig.trim() : undefined;
+  if (q.chain === 'solana') return verifySolanaPayment(tx, q, rpcList(env.SOLANA_RPC, SOLANA_RPC_DEFAULT), f, sig);
   const rpcs = rpcList(env.RH_RPC, []);
   if (!rpcs.length) throw new HttpError(503, 'robinhood chain RPC not configured');
-  return verifyEvmPayment(tx, q, rpcs, f);
+  return verifyEvmPayment(tx, q, rpcs, f, sig);
+}
+
+/** 202 keep polling, 428 sign a claim for the untagged payment and retry, 402 refused. */
+function payFailure(c: Exclude<PayCheck, { ok: true }>): HttpError {
+  if (c.pending) return new HttpError(202, c.reason);
+  return c.needsClaim ? new HttpError(428, c.reason, 'needs_claim') : new HttpError(402, c.reason);
 }
 
 /** What a payment buys in session budget: the amount minus a reserve for the cap's overshoot. */
@@ -81,28 +107,25 @@ export async function createJob(req: JobRequest, d: Deps): Promise<JobView> {
   if (!q || !QUOTE_ID_RE.test(String(q.id)) || q.topup) throw new HttpError(400, 'bad quote');
   if (!(await verifyQuote(q, env.QUOTE_SECRET))) throw new HttpError(400, 'that quote was tampered with');
 
+  const tx = String(req.payTx ?? '').trim();
   const existing = await store.getJob(q.id);
   if (existing) {
-    if (existing.payTx !== req.payTx) throw new HttpError(409, 'that quote was already used');
+    if (existing.payTx !== tx) throw new HttpError(409, 'that quote was already used');
     return advance(existing, d);
   }
 
   const projectName = String(req.project?.name ?? '').trim();
-  const nameErr = validateProjectName(projectName);
-  if (nameErr) throw new HttpError(400, nameErr);
   const token = req.token ?? ({} as JobRequest['token']);
   const tokenName = String(token.name ?? '').trim();
   const ticker = String(token.ticker ?? '').trim().toUpperCase();
-  if (!NAME_RE.test(tokenName)) throw new HttpError(400, 'token name: 2-32 characters');
-  if (!TICKER_RE.test(ticker)) throw new HttpError(400, 'ticker: 2-10 letters or numbers');
+  // The same checks the site runs before anything is paid (shared/contract.ts).
+  const nameErr = validateOrderNames(q.target, projectName, tokenName, ticker);
+  if (nameErr) throw new HttpError(400, nameErr.msg);
   if (!PADS.includes(token.pad)) throw new HttpError(400, 'pick a launchpad');
   if (PAD_CHAIN[token.pad] !== q.chain) throw new HttpError(400, `${token.pad} launches are paid on ${PAD_CHAIN[token.pad]}`);
-  const clash = brandClash(q.target, tokenName, ticker) ?? brandClash(q.target, projectName, '');
-  if (clash) throw new HttpError(400, clash);
 
-  const tx = String(req.payTx ?? '').trim();
-  const check = await checkPayment(env, q, tx, d.fetch);
-  if (!check.ok) throw new HttpError(check.pending ? 202 : 402, check.reason);
+  const check = await checkPayment(env, q, tx, d.fetch, req.claimSig);
+  if (!check.ok) throw payFailure(check);
 
   const key = payKey(q, tx);
   const owner = await store.claimPayment(key, q.id);
@@ -142,21 +165,50 @@ export async function getJob(id: string, d: Deps): Promise<JobView> {
   return advance(job, d);
 }
 
+function needsWork(job: JobRecord, now: number): boolean {
+  if (job.status === 'starting') return now >= (job.nextAttemptAt ?? 0);
+  return (job.status === 'running' || job.status === 'paused') && now - (job.syncedAt ?? 0) >= SYNC_EVERY_MS;
+}
+
 /** Moves the job forward if it needs it and nobody else is already doing so. */
 export async function advance(job: JobRecord, d: Deps): Promise<JobView> {
   const now = (d.now ?? Date.now)();
-  const needsWork =
-    job.status === 'starting' || ((job.status === 'running' || job.status === 'paused') && now - (job.syncedAt ?? 0) >= SYNC_EVERY_MS);
-  if (!needsWork) return view(job);
-  if (!(await d.store.lease(job.id, LEASE_MS))) return view(job);
+  if (!needsWork(job, now)) return view(job);
+  const token = await d.store.lease(job.id, LEASE_MS);
+  if (!token) return view(job);
   try {
     const fresh = (await d.store.getJob(job.id)) ?? job;
-    if (fresh.status === 'starting') await start(fresh, d);
-    else if (fresh.status === 'running' || fresh.status === 'paused') await sync(fresh, d);
-    await d.store.putJob(fresh);
+    if (!needsWork(fresh, now)) return view(fresh);
+    const save = async (renew = false) => {
+      if (!(await d.store.putJob(fresh, token))) throw new LeaseLost();
+      if (renew && !(await d.store.renew(fresh.id, token, LEASE_MS))) throw new LeaseLost();
+    };
+    if (fresh.status === 'starting') await start(fresh, d, save);
+    else await sync(fresh, d);
+    await save();
     return view(fresh);
+  } catch (e) {
+    if (e instanceof LeaseLost) return view((await d.store.getJob(job.id)) ?? job);
+    throw e;
   } finally {
-    await d.store.unlease(job.id);
+    await d.store.unlease(job.id, token);
+  }
+}
+
+/** Runs fn on a fresh read of the job under its lease, waiting briefly while a poller holds it. */
+async function withLease<T>(id: string, d: Deps, fn: (job: JobRecord, token: string) => Promise<T>): Promise<T> {
+  let token: string | null = null;
+  for (let i = 0; i < LEASE_WAIT_TRIES && !token; i++) {
+    if (i) await sleepFor(d)(LEASE_WAIT_MS);
+    token = await d.store.lease(id, LEASE_MS);
+  }
+  if (!token) throw new HttpError(503, 'job is busy, try again in a few seconds');
+  try {
+    const job = await d.store.getJob(id);
+    if (!job) throw new HttpError(404, 'no such job');
+    return await fn(job, token);
+  } finally {
+    await d.store.unlease(id, token);
   }
 }
 
@@ -167,8 +219,17 @@ function push(job: JobRecord, text: string, at = new Date().toISOString()) {
   if (job.feed.length > FEED_MAX) job.feed.splice(0, job.feed.length - FEED_MAX);
 }
 
-async function start(job: JobRecord, d: Deps) {
+function startBackoff(attempts: number): number {
+  return START_BACKOFF_MS[Math.min(attempts, START_BACKOFF_MS.length) - 1];
+}
+
+/**
+ * Creates the repo, environment and session, saving after each one, so a retry (or a worker that
+ * takes over an expired lease) reuses what exists instead of paying for a second session.
+ */
+async function start(job: JobRecord, d: Deps, save: (renew?: boolean) => Promise<void>) {
   const { env } = d;
+  const now = (d.now ?? Date.now)();
   job.attempts++;
   try {
     if (!job.repo) {
@@ -181,42 +242,59 @@ async function start(job: JobRecord, d: Deps) {
         projectPage(env, job.id),
       );
       push(job, `repo ready: ${job.repo.fullName}`);
+      await save();
     }
-    // Persisted step by step (the job is saved even when a later step throws), so a retry
-    // never creates a second repo, environment or session.
-    job.environmentId ??= await createJobEnvironment(d.engine, job.id, job.quote.target);
+    if (!job.environmentId) {
+      job.environmentId = await createJobEnvironment(d.engine, job.id, job.quote.target);
+      await save();
+    }
+    // An earlier attempt may have created the session upstream and died (or seen an error) before
+    // saving its id.
+    if (!job.sessionId && job.sessionRequestedAt) job.sessionId = (await d.engine.findSession(job.id, job.createdAt)) ?? undefined;
     if (!job.sessionId) {
-      job.sessionId = await startSession({
-        api: d.engine,
-        store: d.store,
-        model: env.MODEL || 'claude-opus-5-5',
-        jobId: job.id,
-        target: job.quote.target,
-        tier: job.quote.tier,
-        budgetCents: job.budgetCents,
-        task: {
+      job.sessionId = await startSession(
+        {
+          api: d.engine,
+          store: d.store,
+          model: env.MODEL || 'claude-opus-5-5',
           jobId: job.id,
           target: job.quote.target,
           tier: job.quote.tier,
-          projectName: job.project.name,
-          tokenName: job.token.name,
-          tokenTicker: job.token.ticker,
+          budgetCents: job.budgetCents,
+          task: {
+            jobId: job.id,
+            target: job.quote.target,
+            tier: job.quote.tier,
+            projectName: job.project.name,
+            tokenName: job.token.name,
+            tokenTicker: job.token.ticker,
+          },
+          buildRepo: { url: job.repo.url, branch: job.repo.branch, token: env.GITHUB_TOKEN },
+          engineRepo: { url: env.ENGINE_REPO || 'https://github.com/rayman-jpg/Moola', branch: env.ENGINE_BRANCH || 'claude/moola-degen-launcher' },
+          environmentId: job.environmentId,
         },
-        buildRepo: { url: job.repo.url, branch: job.repo.branch, token: env.GITHUB_TOKEN },
-        engineRepo: { url: env.ENGINE_REPO || 'https://github.com/rayman-jpg/Moola', branch: env.ENGINE_BRANCH || 'claude/moola-degen-launcher' },
-        environmentId: job.environmentId,
-      });
+        // After the agent sync, immediately before the create: the marker goes in and the lease
+        // gets a full term for the create itself.
+        async () => {
+          job.sessionRequestedAt = (d.now ?? Date.now)();
+          await save(true);
+        },
+      );
     }
     job.status = 'running';
     job.error = undefined;
+    job.nextAttemptAt = undefined;
     job.syncedAt = 0;
     push(job, 'engine started. recon first, then spec, then build');
   } catch (e) {
+    if (e instanceof LeaseLost) throw e;
     const msg = (e as Error).message ?? String(e);
     job.error = `start attempt ${job.attempts} failed: ${msg.slice(0, 200)}`;
-    if (job.attempts >= MAX_START_ATTEMPTS) {
+    if (now - job.createdAt >= START_DEADLINE_MS) {
       job.status = 'failed';
       push(job, 'could not start the engine. your payment is recorded; contact support with this job id');
+    } else {
+      job.nextAttemptAt = now + startBackoff(job.attempts);
     }
   }
 }
@@ -267,9 +345,32 @@ async function sync(job: JobRecord, d: Deps) {
     return;
   }
   const terminal = ['satisfied', 'max_iterations_reached', 'failed', 'interrupted'];
-  const outcomeDone = s.outcome && terminal.includes(s.outcome.result);
+  const outcomeDone = !!s.outcome && terminal.includes(s.outcome.result);
+  // Overloaded upstream: the turn failed but the session still takes messages and has budget left.
+  if (s.status === 'idle' && stop === 'retries_exhausted' && !outcomeDone && s.spentCents < job.budgetCents && (job.resumes ?? 0) < MAX_RESUMES) {
+    job.status = 'running';
+    if (now >= (job.resumeAfter ?? 0)) {
+      // Counted before sending, so a session that refuses the message still reaches the cap.
+      job.resumes = (job.resumes ?? 0) + 1;
+      const n = job.resumes;
+      job.resumeAfter = now + RESUME_BACKOFF_MS[Math.min(n, RESUME_BACKOFF_MS.length) - 1];
+      await d.engine.resume(job.sessionId, RESUME_TEXT).then(
+        () => push(job, `engine hit upstream errors. nudged it to carry on (${n}/${MAX_RESUMES})`),
+        () => push(job, `engine hit upstream errors and didn't take a nudge (${n}/${MAX_RESUMES})`),
+      );
+    }
+    return;
+  }
   if (s.status === 'terminated' || (s.status === 'idle' && (outcomeDone || stop === 'end_turn' || stop === 'retries_exhausted' || stop === 'refusal'))) {
     await collect(job, d);
+    // Outputs show up a few seconds after the idle event: look again on the next syncs first.
+    if (!job.manifest) {
+      job.collectTries = (job.collectTries ?? 0) + 1;
+      if (job.collectTries < COLLECT_TRIES) {
+        job.status = 'running';
+        return;
+      }
+    }
     if (job.manifest?.status === 'refused') {
       job.status = 'refused';
       push(job, `engine refused: ${job.manifest.refusal ?? 'target not allowed'}`);
@@ -351,11 +452,14 @@ async function collect(job: JobRecord, d: Deps) {
   let spec: string | null = null;
   try {
     const files = await d.engine.listOutputs(job.sessionId);
-    const latest = (name: string) =>
-      files.filter((f) => f.filename === name || f.filename.endsWith(`/${name}`)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-    const m = latest('rea4u.json');
-    const s = latest('SPEC.md');
-    if (m) manifestText = await d.engine.downloadText(m.id, 100_000);
+    // Oversized outputs are skipped (an agent, or content it read, can write anything there).
+    const latest = (name: string, max: number) =>
+      files
+        .filter((f) => (f.filename === name || f.filename.endsWith(`/${name}`)) && !(f.sizeBytes > max))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    const m = latest('rea4u.json', MANIFEST_MAX);
+    const s = latest('SPEC.md', SPEC_MAX);
+    if (m) manifestText = await d.engine.downloadText(m.id, MANIFEST_MAX);
     if (s) spec = await d.engine.downloadText(s.id, SPEC_MAX);
   } catch {
     // fall through to the repo
@@ -370,68 +474,87 @@ async function collect(job: JobRecord, d: Deps) {
 }
 
 /** POST /api/jobs/:id/topup: a paid top-up raises the session budget, which resumes it. */
-export async function topupJob(id: string, body: { quote: Quote; payTx: string }, d: Deps): Promise<JobView> {
+export async function topupJob(id: string, body: { quote: Quote; payTx: string; claimSig?: string }, d: Deps): Promise<JobView> {
   const { env, store } = d;
   const q = body?.quote;
   if (!q || q.topup !== id || !(await verifyQuote(q, env.QUOTE_SECRET))) throw new HttpError(400, 'bad top-up quote');
   const job = await store.getJob(id);
   if (!job) throw new HttpError(404, 'no such job');
-  if (job.status !== 'paused' && job.status !== 'running') throw new HttpError(409, `job is ${job.status}, nothing to top up`);
   const tx = String(body.payTx ?? '').trim();
   const key = payKey(q, tx);
-  if (job.payments.includes(key)) return view(job);
-  const check = await checkPayment(env, q, tx, d.fetch);
-  if (!check.ok) throw new HttpError(check.pending ? 202 : 402, check.reason);
+  const owner = await store.payment(key);
+  if (owner && owner.jobId !== id) throw new HttpError(409, 'that payment was already used');
+  if (owner?.credited || key === payKey(job.quote, job.payTx)) return view(job);
+  if (job.status !== 'paused' && job.status !== 'running') throw new HttpError(409, `job is ${job.status}, nothing to top up`);
+  const check = await checkPayment(env, q, tx, d.fetch, body.claimSig);
+  if (!check.ok) throw payFailure(check);
+  // A verified top-up for this job stays bound to it, even while crediting it has to be retried.
   if ((await store.claimPayment(key, id)) !== id) throw new HttpError(409, 'that payment was already used');
-  if (!(await store.lease(id, LEASE_MS))) {
-    await store.releasePayment(key, id);
-    throw new HttpError(503, 'job is busy, try again in a few seconds');
-  }
-  try {
-    const fresh = (await store.getJob(id))!;
-    const s = await d.engine.retrieveSession(fresh.sessionId!);
-    // The new cap must sit above what's already been spent (which can overshoot the old cap
-    // by one model request), so add the top-up to whichever is higher.
-    const base = Math.max(fresh.budgetCents, s.spentCents);
-    fresh.budgetCents = base + sessionBudget(env, q.usdCents);
-    await d.engine.setBudget(fresh.sessionId!, fresh.budgetCents);
-    fresh.payments.push(key);
-    fresh.status = 'running';
-    fresh.syncedAt = 0;
-    push(fresh, `topped up ${(q.usdCents / 100).toFixed(2)} USD. back to work`);
-    await store.putJob(fresh);
+  return withLease(id, d, async (fresh, token) => {
+    // Decided under the lease from the credited marker, which is written together with the budget.
+    if ((await store.payment(key))?.credited || fresh.payments.includes(key)) return view(fresh);
+    if (fresh.status !== 'paused' && fresh.status !== 'running') throw new HttpError(409, `job is ${fresh.status}, nothing to top up`);
+    // Another top-up stopped between raising the cap and saving it: finish it first, at its own target.
+    const prior = fresh.crediting;
+    if (prior && prior.paymentKey !== key) {
+      if ((await store.payment(prior.paymentKey))?.credited) fresh.crediting = undefined;
+      else await credit(fresh, token, prior, d);
+    }
+    let c = fresh.crediting;
+    if (!c) {
+      const s = await d.engine.retrieveSession(fresh.sessionId!);
+      // The new cap must sit above what's already been spent (which can overshoot the old cap
+      // by one model request), so add the top-up to whichever is higher.
+      const base = Math.max(fresh.budgetCents, s.spentCents);
+      c = { paymentKey: key, targetCents: base + sessionBudget(env, q.usdCents), usdCents: q.usdCents };
+      // Saved before the cap moves: once it has, spend can grow past `base`, and recomputing the
+      // target on a retry would credit that spend a second time.
+      fresh.crediting = c;
+      if (!(await store.putJob(fresh, token))) throw new HttpError(503, 'job is busy, try again in a few seconds');
+    }
+    await credit(fresh, token, c, d);
     return view(fresh);
-  } catch (e) {
-    await store.releasePayment(key, id);
-    throw e;
-  } finally {
-    await store.unlease(id);
-  }
+  });
+}
+
+/** Raises the session cap to a saved top-up target and records that payment credited, under the lease. */
+async function credit(job: JobRecord, token: string, c: NonNullable<JobRecord['crediting']>, d: Deps) {
+  await d.engine.setBudget(job.sessionId!, c.targetCents);
+  job.budgetCents = c.targetCents;
+  if (!job.payments.includes(c.paymentKey)) job.payments.push(c.paymentKey);
+  job.crediting = undefined;
+  job.status = 'running';
+  job.syncedAt = 0;
+  push(job, `topped up ${(c.usdCents / 100).toFixed(2)} USD. back to work`);
+  if (!(await d.store.putJob(job, token, c.paymentKey))) throw new HttpError(503, 'job is busy, try again in a few seconds');
 }
 
 const SOL_ADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const EVM_ADDR = /^0x[0-9a-fA-F]{40}$/;
 
-/** POST /api/jobs/:id/token: records the launched token (shown on the project page). */
+/**
+ * POST /api/jobs/:id/token: records the launched token (shown on the project page). {failed: true}
+ * is ignored: anyone can call this, and only a verified launch changes the record.
+ */
 export async function recordToken(id: string, body: { mint?: string; tx?: string; url?: string; armTx?: string; failed?: boolean }, d: Deps): Promise<JobView> {
   const job = await d.store.getJob(id);
   if (!job) throw new HttpError(404, 'no such job');
-  if (job.token.status === 'live') return view(job);
-  if (body?.failed) {
-    job.token.status = 'failed';
-  } else {
-    const mint = String(body?.mint ?? '');
-    const ok = job.quote.chain === 'solana' ? SOL_ADDR.test(mint) : EVM_ADDR.test(mint);
-    if (!ok) throw new HttpError(400, 'bad token address');
-    const proof = await tokenLaunchedBy(d, job, mint, String(body?.tx ?? ''));
-    if (!proof) throw new HttpError(400, "couldn't confirm that launch on-chain yet");
-    // A StonkLauncher token only trades once its supply is armed: require that tx too.
-    if (job.token.pad === 'stonk' && !(await stonkArmed(d, job, String(body?.armTx ?? '')))) throw new HttpError(400, "couldn't confirm the launch was armed yet");
-    job.token = { ...job.token, status: 'live', mint, tx: String(body.tx), url: safeLaunchUrl(job.token.pad, mint, body.url) };
-    push(job, `$${job.token.ticker} is live`);
-  }
-  await d.store.putJob(job);
-  return view(job);
+  if (job.token.status === 'live' || body?.failed === true) return view(job);
+  const mint = String(body?.mint ?? '');
+  const tx = String(body?.tx ?? '');
+  const ok = job.quote.chain === 'solana' ? SOL_ADDR.test(mint) : EVM_ADDR.test(mint);
+  if (!ok) throw new HttpError(400, 'bad token address');
+  // Proven on what never changes (payer, chain, pad), so it can run before taking the lease.
+  if (!(await tokenLaunchedBy(d.env, d.fetch, job, mint, tx))) throw new HttpError(400, "couldn't confirm that launch on-chain yet");
+  // A StonkLauncher token only trades once its supply is armed: require that tx too.
+  if (job.token.pad === 'stonk' && !(await stonkArmed(d.env, d.fetch, job, mint, tx, String(body?.armTx ?? '')))) throw new HttpError(400, "couldn't confirm the launch was armed yet");
+  return withLease(id, d, async (fresh, token) => {
+    if (fresh.token.status === 'live') return view(fresh);
+    fresh.token = { ...fresh.token, status: 'live', mint, tx, url: safeLaunchUrl(fresh.token.pad, mint, body.url) };
+    push(fresh, `$${fresh.token.ticker} is live`);
+    if (!(await d.store.putJob(fresh, token))) throw new HttpError(503, 'job is busy, try again in a few seconds');
+    return view(fresh);
+  });
 }
 
 /** Coin page links are built here (or strictly pattern-checked), never taken from the client as-is. */
@@ -452,69 +575,6 @@ export function safeLaunchUrl(pad: PadId, mint: string, claimed?: string): strin
       return claimed && /^https:\/\/stonkbrokers\.io\/safe-launch\/token\/weth2-[a-z0-9]{1,24}-\d{1,9}$/.test(claimed)
         ? claimed
         : `https://robinhoodchain.blockscout.com/token/${mint.toLowerCase()}`;
-  }
-}
-
-/** The launch tx must be confirmed, signed by the job's payer, and touch the mint. */
-async function tokenLaunchedBy(d: Deps, job: JobRecord, mint: string, tx: string): Promise<boolean> {
-  try {
-    if (job.quote.chain === 'solana') {
-      const rpcs = rpcList(d.env.SOLANA_RPC, SOLANA_RPC_DEFAULT);
-      const r = await d.fetch(rpcs[0], {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'getTransaction',
-          params: [tx, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 1 }],
-        }),
-      });
-      const j = (await r.json()) as {
-        result?: { meta?: { err: unknown }; transaction?: { message?: { accountKeys?: { pubkey: string; signer: boolean }[] } } };
-      };
-      const keys = j.result?.transaction?.message?.accountKeys ?? [];
-      return !j.result?.meta?.err && j.result?.meta !== undefined && keys.some((k) => k.pubkey === job.payer && k.signer) && keys.some((k) => k.pubkey === mint);
-    }
-    const rpcs = rpcList(d.env.RH_RPC, []);
-    if (!rpcs.length) return false;
-    const call = async (method: string, params: unknown[]) => {
-      const r = await d.fetch(rpcs[0], {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      });
-      return ((await r.json()) as { result?: unknown }).result;
-    };
-    const rc = (await call('eth_getTransactionReceipt', [tx])) as { status?: string; from?: string; logs?: { address?: string }[] } | null;
-    if (!rc || rc.status !== '0x1' || rc.from?.toLowerCase() !== job.payer.toLowerCase()) return false;
-    return (rc.logs ?? []).some((l) => l.address?.toLowerCase() === mint.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
-const STONK_PAD = '0xfcd61b25bbf3abd6cf0070d6328e351cc30eec9f';
-
-async function stonkArmed(d: Deps, job: JobRecord, tx: string): Promise<boolean> {
-  const rpcs = rpcList(d.env.RH_RPC, []);
-  if (!rpcs.length || !/^0x[0-9a-fA-F]{64}$/.test(tx)) return false;
-  try {
-    const r = await d.fetch(rpcs[0], {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt', params: [tx] }),
-    });
-    const rc = ((await r.json()) as { result?: { status?: string; from?: string; to?: string; logs?: { address?: string }[] } | null }).result;
-    return (
-      !!rc &&
-      rc.status === '0x1' &&
-      rc.from?.toLowerCase() === job.payer.toLowerCase() &&
-      rc.to?.toLowerCase() === STONK_PAD &&
-      (rc.logs ?? []).some((l) => l.address?.toLowerCase() === STONK_PAD)
-    );
-  } catch {
-    return false;
   }
 }
 

@@ -1,10 +1,10 @@
 // The rea order form: target -> depth -> name/logo -> launchpad -> hosting vibe -> REA IT.
-import { brandClash, DEFAULT_NEEDS, formatUsd, parseTarget, TIERS, validateProjectName, type HostingNeeds, type PadId, type Target, type Tier } from '../shared/contract';
+import { DEFAULT_NEEDS, formatUsd, parseTarget, TIERS, validateOrderNames, type HostingNeeds, type PadId, type Target, type Tier } from '../shared/contract';
 import { engineStatus } from './api';
 import { placeOrder, type Step } from './checkout';
 import { canvasToBlob, drawCoinArt } from './coinArt';
 import { emojiFor, sanitizeTicker } from './coinify';
-import { friendlyError } from './errors';
+import { friendlyError, isNotCharged, paidError } from './errors';
 import { stripImageMetadata } from './metadata';
 import { suggestName } from './naming';
 import { CHAIN_LABEL, PADS, padInfo, type PadInfo } from './pads';
@@ -49,7 +49,8 @@ const els = {
   sendBarBtn: $<HTMLButtonElement>('send-bar-btn'),
 };
 
-let onDone: (jobId: string) => void = () => {};
+/** Opens the job's project page; `message` is shown there (it always says the payment went through). */
+let onDone: (jobId: string, message?: string) => void = () => {};
 
 // ── target ──
 function renderPicks() {
@@ -89,6 +90,11 @@ async function githubInfo(t: Target) {
     if (st.target?.url !== t.url) return;
     if (r.status === 404) {
       $('target-info').innerHTML = `<b>GitHub repo</b> · ${esc(t.label)} · <span class="bad">not found or private. rea4u only does public stuff</span>`;
+      return;
+    }
+    // Rate limited (403/429) or GitHub trouble: the body isn't repo data, so show no details.
+    if (!r.ok) {
+      $('target-info').innerHTML = `<b>GitHub repo</b> · ${esc(t.label)}`;
       return;
     }
     const j = (await r.json()) as { stargazers_count?: number; license?: { spdx_id?: string } | null; description?: string | null; language?: string | null };
@@ -227,6 +233,7 @@ radioGroup('pads', 'pad', () => PADS.filter((p) => !p.soon).map((p) => p.id), ()
 });
 
 const BUYS: Record<PadInfo['chain'], number[]> = { solana: [0, 0.1, 0.5, 1], robinhood: [0, 0.001, 0.005, 0.01] };
+const MAX_BUY: Record<PadInfo['chain'], number> = { solana: 85, robinhood: 5 };
 function renderBuys() {
   const pad = padInfo(st.pad);
   const unit = pad.chain === 'solana' ? 'SOL' : 'ETH';
@@ -250,7 +257,7 @@ $('buy-chips').addEventListener('click', (e) => {
 $('buy-chips').addEventListener('input', (e) => {
   const t = e.target as HTMLInputElement;
   if (t.id !== 'buy-custom') return;
-  const max = padInfo(st.pad).chain === 'solana' ? 85 : 5;
+  const max = MAX_BUY[padInfo(st.pad).chain];
   const v = Number(t.value);
   st.devBuy = Number.isFinite(v) && v > 0 ? Math.min(v, max) : 0;
   document.querySelectorAll<HTMLElement>('#buy-chips .chip').forEach((c) => c.setAttribute('aria-pressed', String(Number(c.dataset.buy) === st.devBuy && !t.value)));
@@ -379,11 +386,17 @@ function restoreDraft(): boolean {
     const d = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)))) as Draft;
     if (typeof d.t !== 'string' || typeof d.n !== 'string') return false;
     els.target.value = d.t.slice(0, 300);
-    if (d.r in TIERS) st.tier = d.r;
+    // A crafted link can carry anything: only accept values the form itself could produce.
+    if (Object.hasOwn(TIERS, d.r)) st.tier = d.r;
     if (PADS.some((p) => p.id === d.p && !p.soon)) st.pad = d.p;
-    st.devBuy = Math.max(0, Math.min(Number(d.b) || 0, 85));
-    st.needs = { budget: d.h?.budget ?? 'free', traffic: d.h?.traffic ?? 'hobby', customDomain: d.h?.customDomain === true };
-    st.reroll = Number(d.x) || 0;
+    const pad = padInfo(st.pad);
+    st.devBuy = pad.devBuy ? Math.max(0, Math.min(Number(d.b) || 0, MAX_BUY[pad.chain])) : 0;
+    st.needs = {
+      budget: BUDGET.find(([v]) => v === d.h?.budget)?.[0] ?? 'free',
+      traffic: TRAFFIC.find(([v]) => v === d.h?.traffic)?.[0] ?? 'hobby',
+      customDomain: d.h?.customDomain === true,
+    };
+    st.reroll = Math.max(0, Math.floor(Number(d.x) || 0));
     setTarget(els.target.value);
     els.name.value = d.n.slice(0, 32);
     els.ticker.value = sanitizeTicker(d.k ?? '');
@@ -415,20 +428,20 @@ els.form.addEventListener('submit', async (e) => {
   if (!st.target) return fieldError('target', $('target-err').textContent || 'paste a GitHub repo or a website to rea');
   const name = els.name.value.trim().replace(/\s+/g, ' ');
   const ticker = sanitizeTicker(els.ticker.value);
-  const nameErr = validateProjectName(name);
-  if (nameErr) return fieldError('name', nameErr);
-  if (ticker.length < 2) return fieldError('ticker', 'ticker: 2-10 letters or numbers');
-  const clash = brandClash(st.target, name, ticker);
-  if (clash) return fieldError(brandClash(st.target, name, '') ? 'name' : 'ticker', clash);
+  // Every check the engine runs on the names (the token is named after the project), before anything is paid.
+  const bad = validateOrderNames(st.target, name, name, ticker);
+  if (bad) return fieldError(bad.field, bad.msg);
   if (st.engineOk === false) return showMsg('the rea4u engine is not connected yet, so nothing can be paid. check back soon.');
 
   const pad = padInfo(st.pad);
-  const order = { target: st.target, tier: st.tier, name, ticker, pad, devBuy: pad.devBuy ? st.devBuy : 0, needs: { ...st.needs }, image: await currentImage() };
+  // Locked in the same synchronous run as the busy check: a double tap can't start a second order.
   lock(true);
   renderSteps(pad);
   els.steps.hidden = false;
   let current: Step | null = null;
+  const paid = { job: '' };
   try {
+    const order = { target: st.target, tier: st.tier, name, ticker, pad, devBuy: pad.devBuy ? st.devBuy : 0, needs: { ...st.needs }, image: await currentImage() };
     const r = await placeOrder(order, {
       step: (s) => {
         current = s;
@@ -436,13 +449,20 @@ els.form.addEventListener('submit', async (e) => {
       },
       note: (m) => showMsg(esc(m), true),
       handoff: handoffUrl,
+      paid: (id) => (paid.job = id),
     });
     setStep(null);
     if (r.launched) confetti();
-    else toast(r.launchError ?? 'token launch pending');
-    onDone(r.jobId);
+    if (r.message) toast(r.message);
+    onDone(r.jobId, r.message);
   } catch (err) {
-    if ((err as Error).message === 'cancelled') {
+    // placeOrder doesn't throw after a payment, except when it provably never went through (nothing
+    // was charged: the form says so). If something else still does, the job page takes over.
+    if (paid.job && !isNotCharged(err)) {
+      const msg = paidError(err);
+      toast(msg);
+      onDone(paid.job, msg);
+    } else if ((err as Error).message === 'cancelled') {
       els.steps.hidden = true;
     } else {
       if (current) setStep(current, 'error');
@@ -502,13 +522,9 @@ export function setEngineState(ok: boolean, missing?: string[]) {
   updateSendBar();
 }
 
-export async function initOrder(done: (jobId: string) => void) {
+export async function initOrder(done: (jobId: string, message?: string) => void) {
   onDone = done;
   renderPicks();
-  renderTiers();
-  renderPads();
-  renderBuys();
-  renderNeeds();
   $('art-hint').textContent = ART_HINT;
   const names = PADS.filter((p) => !p.soon).map((p) => p.name);
   $('pad-names').textContent = `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
@@ -516,6 +532,11 @@ export async function initOrder(done: (jobId: string) => void) {
     els.target.value = PICKS[0][0];
     setTarget(els.target.value);
   }
+  // After the draft: the controls must show what the order will actually use.
+  renderTiers();
+  renderPads();
+  renderBuys();
+  renderNeeds();
   updateSummary();
   scheduleArt();
   const cfg = await engineStatus();

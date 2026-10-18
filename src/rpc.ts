@@ -155,6 +155,21 @@ async function status(sig: string, history: boolean): Promise<SigStatus | null> 
 }
 
 /**
+ * One look, no waiting, for a transaction sent a while ago. 'expired' only when its blockhash is dead
+ * and no node has the signature (searching history); 'unknown' while it could still land. Throws when
+ * the RPC can't be reached.
+ */
+export async function landingNow(sig: string, blockhash: string): Promise<Landing> {
+  // Only a confirmed verdict counts: a processed-only status can still change with the fork.
+  const seen = (s: SigStatus | null): Landing | null => (!s ? null : s.confirmationStatus === 'processed' ? 'unknown' : s.err ? 'failed' : 'confirmed');
+  const first = seen(await status(sig, true));
+  if (first) return first;
+  if (await isBlockhashValid(blockhash)) return 'unknown';
+  // It could have landed between the two calls.
+  return seen(await status(sig, true)) ?? 'expired';
+}
+
+/**
  * Waits until the transaction is confirmed, fails, or provably can no longer land (its blockhash
  * expired and it is not on chain). 'unknown' only when the RPC can't tell us within the time limit.
  */

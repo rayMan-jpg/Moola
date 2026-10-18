@@ -31,6 +31,7 @@ export interface OutputFile {
   id: string;
   filename: string;
   createdAt: string;
+  sizeBytes: number;
 }
 
 /** The slice of the Managed Agents API rea4u uses. Mocked in tests. */
@@ -41,12 +42,17 @@ export interface EngineApi {
   createEnvironment(name: string, allowedHosts: string[]): Promise<string>;
   archiveEnvironment(id: string): Promise<void>;
   createSession(p: SessionParams): Promise<string>;
+  /** The session created for a job (metadata.rea4u_job), looking at sessions created since `since`. */
+  findSession(jobId: string, since: number): Promise<string | null>;
   retrieveSession(id: string): Promise<SessionSnapshot>;
   /** Newest first. */
   recentEvents(id: string, limit: number): Promise<EngineEvent[]>;
   denyTools(id: string, eventIds: string[]): Promise<void>;
+  /** Sends a user.message so an idle session carries on. */
+  resume(id: string, text: string): Promise<void>;
   setBudget(id: string, cents: number): Promise<void>;
   listOutputs(sessionId: string): Promise<OutputFile[]>;
+  /** At most maxBytes of the file; the download stops there. */
   downloadText(fileId: string, maxBytes: number): Promise<string>;
 }
 
@@ -145,8 +151,14 @@ export function createJobEnvironment(api: EngineApi, jobId: string, target: Targ
   return api.createEnvironment(`rea4u-${jobId}`, allowedHosts(target));
 }
 
-export async function startSession(a: StartArgs): Promise<string> {
+/**
+ * `beforeCreate` runs after the agent is ready and right before sessions.create (where the caller
+ * saves its "session requested" marker and renews its lease), so a slow agent sync can't use up
+ * the lease between the two.
+ */
+export async function startSession(a: StartArgs, beforeCreate?: () => Promise<void>): Promise<string> {
   const agent = await ensureAgent(a.api, a.store, a.model);
+  await beforeCreate?.();
   return a.api.createSession({
     agentId: agent.id,
     agentVersion: agent.version,
@@ -163,6 +175,29 @@ export async function startSession(a: StartArgs): Promise<string> {
 }
 
 const MANAGED_AGENTS_BETA = 'managed-agents-2026-04-01';
+// Creates are never retried by the SDK: a retried POST that had already committed upstream would
+// leave a second budgeted session or environment. The job's own backoff retries instead.
+const CREATE_OPTS = { maxRetries: 0, timeout: 45_000 };
+/** How many sessions findSession reads before giving up. */
+const SESSION_SCAN_MAX = 500;
+
+/** Reads at most maxBytes of a response body, then cancels the rest of the download. */
+export async function readCapped(r: Response, maxBytes: number): Promise<string> {
+  const reader = r.body?.getReader();
+  if (!reader) return '';
+  const out = new Uint8Array(maxBytes);
+  let n = 0;
+  while (n < maxBytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = value as Uint8Array;
+    const take = Math.min(chunk.byteLength, maxBytes - n);
+    out.set(chunk.subarray(0, take), n);
+    n += take;
+  }
+  if (n >= maxBytes) await reader.cancel().catch(() => undefined);
+  return new TextDecoder().decode(out.subarray(0, n));
+}
 
 function eventText(e: { type: string; content?: unknown }): string | undefined {
   if (!Array.isArray(e.content)) return undefined;
@@ -198,7 +233,7 @@ export function anthropicEngine(client: Anthropic): EngineApi {
           type: 'cloud',
           networking: { type: 'limited', allow_package_managers: true, allow_mcp_servers: false, allowed_hosts: hosts },
         },
-      });
+      }, CREATE_OPTS);
       return env.id;
     },
     async archiveEnvironment(id) {
@@ -224,8 +259,17 @@ export function anthropicEngine(client: Anthropic): EngineApi {
           { type: 'github_repository', url: p.engineRepo.url, mount_path: '/workspace/rea4u', checkout: { type: 'branch', name: p.engineRepo.branch } },
         ],
         initial_events: [p.outcome],
-      });
+      }, CREATE_OPTS);
       return s.id;
+    },
+    async findSession(jobId, since) {
+      let seen = 0;
+      // Oldest first from just before the job existed, so its session comes up early.
+      for await (const s of b.sessions.list({ 'created_at[gte]': new Date(since - 60_000).toISOString(), order: 'asc', limit: 100 })) {
+        if (s.metadata?.rea4u_job === jobId) return s.id;
+        if (++seen >= SESSION_SCAN_MAX) break;
+      }
+      return null;
     },
     async retrieveSession(id) {
       const s = await b.sessions.retrieve(id);
@@ -267,20 +311,21 @@ export function anthropicEngine(client: Anthropic): EngineApi {
         })),
       });
     },
+    async resume(id, text) {
+      await b.sessions.events.send(id, { events: [{ type: 'user.message', content: [{ type: 'text', text }] }] });
+    },
     async setBudget(id, cents) {
       await b.sessions.update(id, { budget: { type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } } });
     },
     async listOutputs(sessionId) {
       const out: OutputFile[] = [];
       for await (const f of b.files.list({ scope_id: sessionId, betas: [MANAGED_AGENTS_BETA] })) {
-        out.push({ id: f.id, filename: f.filename, createdAt: f.created_at });
+        out.push({ id: f.id, filename: f.filename, createdAt: f.created_at, sizeBytes: f.size_bytes });
       }
       return out;
     },
     async downloadText(fileId, maxBytes) {
-      const r = await b.files.download(fileId, { betas: [MANAGED_AGENTS_BETA] });
-      const buf = new Uint8Array(await r.arrayBuffer());
-      return new TextDecoder().decode(buf.subarray(0, maxBytes));
+      return readCapped(await b.files.download(fileId, { betas: [MANAGED_AGENTS_BETA] }), maxBytes);
     },
   };
 }

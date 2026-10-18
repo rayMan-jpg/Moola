@@ -135,11 +135,14 @@ export const jup: Launchpad = {
           await jupJson(await fetchImpl(`${STUDIO_API}/dbc-pool/submit`, { method: 'POST', body: form }));
         } catch (e) {
           // Jupiter's submit errors are opaque; the tx may still have landed. Never let the user
-          // relaunch (new mint = second coin) without checking the chain first.
+          // relaunch (new mint = second coin) without checking the chain first. The error carries
+          // the landing, so callers drop the saved launch only when it provably can't land.
           const st = await waitForLanding(sig, blockhash, { timeoutMs: 60_000 });
           if (st.status === 'confirmed') return sig;
-          if (st.status === 'unknown') throw new Error(`Jupiter didn't confirm and the chain hasn't answered yet. check https://solscan.io/tx/${sig} before launching again.`);
-          throw e;
+          if (st.status === 'unknown') {
+            throw Object.assign(new Error(`Jupiter didn't confirm and the chain hasn't answered yet. check https://solscan.io/tx/${sig} before launching again.`), { landing: st.status });
+          }
+          throw Object.assign(e instanceof Error ? e : new Error(String(e)), { landing: st.status });
         }
         return sig;
       },

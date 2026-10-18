@@ -13,6 +13,8 @@ export const MOCK_WALLET_SCRIPT = ({ address, publicKey }: { address: string; pu
     __mockSend: (tx: number[]) => Promise<number[]>;
     __mockSign: (txs: number[][]) => Promise<number[][]>;
     __mockSignMessage: (m: number[]) => Promise<number[]>;
+    /** Connect prompts the page opened (silent reconnects don't count). */
+    __connects?: number;
   };
   const wallet = {
     version: '1.0.0',
@@ -24,6 +26,7 @@ export const MOCK_WALLET_SCRIPT = ({ address, publicKey }: { address: string; pu
       'standard:connect': {
         version: '1.0.0',
         connect: async (input?: { silent?: boolean }) => {
+          if (!input?.silent) w.__connects = (w.__connects ?? 0) + 1;
           if (input?.silent && !wallet.accounts.length) return { accounts: [] };
           wallet.accounts = [account];
           (listeners.change || []).forEach((l) => l({ accounts: wallet.accounts }));
@@ -78,12 +81,16 @@ export const MOCK_WALLET_SCRIPT = ({ address, publicKey }: { address: string; pu
 export const MOCK_EVM_SCRIPT = ({ address }: { address: string }) => {
   const w = window as unknown as {
     __mockEvmSend: (tx: Record<string, string>) => Promise<string>;
-    __mockEvmReject?: boolean;
+    __mockEvmSign: (messageHex: string, account: string) => Promise<string>;
+    /** Connect prompts the page opened (eth_accounts reconnects don't count). */
+    __connects?: number;
   };
   const provider = {
     request: async ({ method, params }: { method: string; params?: unknown[] }) => {
       switch (method) {
         case 'eth_requestAccounts':
+          w.__connects = (w.__connects ?? 0) + 1;
+          return [address];
         case 'eth_accounts':
           return [address];
         case 'eth_chainId':
@@ -93,6 +100,10 @@ export const MOCK_EVM_SCRIPT = ({ address }: { address: string }) => {
           return null;
         case 'eth_sendTransaction':
           return w.__mockEvmSend((params as Record<string, string>[])[0]);
+        case 'personal_sign': {
+          const [message, account] = params as string[];
+          return w.__mockEvmSign(message, account);
+        }
         default:
           throw Object.assign(new Error(`mock evm wallet: ${method} not supported`), { code: 4200 });
       }

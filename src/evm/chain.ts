@@ -174,6 +174,36 @@ export async function waitReceipt(hash: string, timeoutMs = 90_000): Promise<Evm
   }
 }
 
+/**
+ * Whether the chain still knows a sent transaction: 'mined', 'pending', or 'gone' when no RPC that
+ * answered has it (dropped, or replaced with the wallet's speed up / cancel). Null when none answered.
+ */
+export async function txState(hash: string): Promise<'mined' | 'pending' | 'gone' | null> {
+  let answered = false;
+  for (const url of RH_RPCS) {
+    const tx = await evmRpc<{ blockNumber?: string | null } | null>('eth_getTransactionByHash', [hash], [url]).then(
+      (t) => {
+        answered = true;
+        return t;
+      },
+      () => undefined,
+    );
+    if (tx) return tx.blockNumber ? 'mined' : 'pending';
+  }
+  return answered ? 'gone' : null;
+}
+
+/** EIP-191 personal_sign of a UTF-8 message by the connected account. Returns the hex signature. */
+export async function personalSign(c: EvmConnected, message: string): Promise<Hex> {
+  return (await c.info.provider.request({ method: 'personal_sign', params: [utf8Hex(message), c.address] })) as Hex;
+}
+
+/** The calldata a mined transaction actually carried (wallets may strip it from a plain send). Null if unknown. */
+export async function txInput(hash: string): Promise<Hex | null> {
+  const tx = await evmRpc<{ input?: Hex } | null>('eth_getTransactionByHash', [hash]).catch(() => null);
+  return tx?.input ?? null;
+}
+
 export function utf8Hex(s: string): Hex {
   return `0x${[...new TextEncoder().encode(s)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
 }

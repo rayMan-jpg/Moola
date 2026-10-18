@@ -32,7 +32,8 @@ export interface PreparedLaunch {
   resign?: (signed: Uint8Array) => Uint8Array;
   /**
    * When set, the wallet only signs and this function broadcasts (some launchpads want the
-   * signed transaction posted to their API). Otherwise the wallet signs and sends.
+   * signed transaction posted to their API). Otherwise the wallet signs and sends. Its errors carry
+   * `landing` ('failed' | 'expired' | 'unknown') once it has checked the chain.
    */
   submit?: (signed: Uint8Array) => Promise<string>;
 }

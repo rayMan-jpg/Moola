@@ -1,3 +1,5 @@
+import { ed25519 } from '@noble/curves/ed25519.js';
+import bs58 from 'bs58';
 import { payMemo, type Quote } from '../../../shared/contract';
 import type { Env } from '../../../worker/src/env';
 import { utf8Hex } from '../../../worker/src/pay';
@@ -62,7 +64,10 @@ export function mockFetch(routes: [string, RegExp, Handler][]) {
 }
 
 /** A real mainnet memo+transfer tx (tests/fixtures), re-pointed at a quote. */
-export function solPaymentTx(q: Quote, o: { lamports?: bigint; memo?: string; err?: unknown; blockTime?: number; memoInLogsOnly?: boolean } = {}) {
+export function solPaymentTx(
+  q: Quote,
+  o: { lamports?: bigint; memo?: string; err?: unknown; blockTime?: number; memoInLogsOnly?: boolean; source?: string } = {},
+) {
   const tx = structuredClone(fixture) as Omit<typeof fixture, 'meta'> & { meta: Omit<typeof fixture.meta, 'err'> & { err: unknown } };
   const memo = o.memo ?? payMemo(q.id);
   const ixs = tx.transaction.message.instructions as Record<string, unknown>[];
@@ -71,25 +76,83 @@ export function solPaymentTx(q: Quote, o: { lamports?: bigint; memo?: string; er
   tx.meta.logMessages = tx.meta.logMessages.map((l) => (l.startsWith('Program log: Memo') ? `Program log: Memo (len ${memo.length}): "${memo}"` : l));
   const t = ixs.find((i) => i.program === 'system') as { parsed: { info: Record<string, unknown> } };
   t.parsed.info.destination = q.treasury;
-  t.parsed.info.source = PAYER_SOL;
+  t.parsed.info.source = o.source ?? PAYER_SOL;
+  (tx.transaction.message.accountKeys[0] as { pubkey: string }).pubkey = o.source ?? PAYER_SOL;
   t.parsed.info.lamports = Number(o.lamports ?? BigInt(q.amount));
   tx.meta.err = o.err ?? null;
   tx.blockTime = o.blockTime ?? Math.floor(q.issuedAt / 1000) + 30;
   return tx;
 }
 
-export function evmPayment(q: Quote, o: { to?: string; value?: bigint; input?: string; status?: string; chainId?: number; ts?: number } = {}) {
+export function evmPayment(q: Quote, o: { to?: string; value?: bigint; input?: string; status?: string; chainId?: number; ts?: number; from?: string } = {}) {
+  const from = o.from ?? PAYER_EVM;
   return {
     tx: {
-      from: PAYER_EVM,
+      from,
       to: o.to ?? q.treasury,
       value: '0x' + (o.value ?? BigInt(q.amount)).toString(16),
       input: o.input ?? utf8Hex(payMemo(q.id)),
       chainId: '0x' + (o.chainId ?? q.evmChainId ?? 1).toString(16),
       blockNumber: '0x10',
     },
-    receipt: { status: o.status ?? '0x1', blockNumber: '0x10', from: PAYER_EVM, logs: [] },
+    receipt: { status: o.status ?? '0x1', blockNumber: '0x10', from, logs: [] },
     block: { timestamp: '0x' + Math.floor((o.ts ?? q.issuedAt + 20_000) / 1000).toString(16) },
+  };
+}
+
+/** A wallet whose transfers can be claimed: an ed25519 key and its base58 address. */
+export function solWallet() {
+  const secret = ed25519.utils.randomSecretKey();
+  const address = bs58.encode(ed25519.getPublicKey(secret));
+  return { address, sign: (msg: string) => btoa(String.fromCharCode(...ed25519.sign(new TextEncoder().encode(msg), secret))) };
+}
+
+const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+const tokenBalance = (mint: string, accountIndex: number) => ({
+  accountIndex,
+  mint,
+  owner: 'AfX3mqKEBVboQpDqDdMneLT7WgWsaw8Q6SR1PRRwEisw',
+  programId: TOKEN_2022,
+  uiTokenAmount: { amount: '1000000000000000', decimals: 6, uiAmount: 1e9, uiAmountString: '1000000000' },
+});
+
+/**
+ * jsonParsed getTransaction for a Solana launch (shapes as mainnet returns them): signers, programs
+ * (outer or CPI), timing, and the token side. `mints` are created by the tx (token program
+ * initializeMint2 + a balance afterwards); `pre`/`post` add bare token balances.
+ */
+export function solLaunchTx(o: {
+  signers: string[];
+  others?: string[];
+  programs?: string[];
+  inner?: string[];
+  err?: unknown;
+  blockTime?: number;
+  mints?: string[];
+  pre?: string[];
+  post?: string[];
+}) {
+  const created = o.mints ?? [];
+  const initMint = (mint: string) => ({
+    program: 'spl-token',
+    programId: TOKEN_2022,
+    parsed: { type: 'initializeMint2', info: { decimals: 6, mint, mintAuthority: 'TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM' } },
+    stackHeight: 2,
+  });
+  return {
+    blockTime: o.blockTime ?? Math.floor(Date.now() / 1000),
+    meta: {
+      err: o.err ?? null,
+      innerInstructions: [{ index: 0, instructions: [...created.map(initMint), ...(o.inner ?? []).map((programId) => ({ programId, data: '' }))] }],
+      preTokenBalances: (o.pre ?? []).map(tokenBalance),
+      postTokenBalances: [...created, ...(o.post ?? [])].map(tokenBalance),
+    },
+    transaction: {
+      message: {
+        accountKeys: [...o.signers.map((pubkey) => ({ pubkey, signer: true })), ...(o.others ?? []).map((pubkey) => ({ pubkey, signer: false }))],
+        instructions: (o.programs ?? []).map((programId) => ({ programId, accounts: [], data: '' })),
+      },
+    },
   };
 }
 

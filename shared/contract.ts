@@ -99,8 +99,6 @@ export interface Quote {
   treasury: string;
   /** EVM chain id for robinhood quotes. */
   evmChainId?: number;
-  /** Wallet expected to pay (lowercase on EVM). Lets a payment whose tag a wallet dropped still match. */
-  payer?: string;
   issuedAt: number;
   expiresAt: number;
   sig: string;
@@ -110,7 +108,6 @@ export interface QuoteRequest {
   target: string;
   tier: Tier;
   chain: ChainId;
-  payer?: string;
   topup?: string;
   usdCents?: number;
 }
@@ -128,6 +125,12 @@ export interface TokenInput {
 export interface JobRequest {
   quote: Quote;
   payTx: string;
+  /**
+   * Only for payments whose rea4u tag the wallet dropped (no memo / empty calldata): a signature by
+   * the paying wallet over claimMessage(quote.id, payTx). EVM: personal_sign hex. Solana: base64
+   * ed25519 signature of the UTF-8 message.
+   */
+  claimSig?: string;
   project: ProjectInput;
   token: TokenInput;
   needs: HostingNeeds;
@@ -174,6 +177,11 @@ export interface ApiConfig {
   chains: ChainId[];
   tiers: TierInfo[];
   evmChainId?: number;
+}
+
+/** What the paying wallet signs to claim a payment that lost its tag (see JobRequest.claimSig). */
+export function claimMessage(quoteId: string, tx: string): string {
+  return `rea4u payment claim\nquote: ${quoteId}\ntx: ${tx}`;
 }
 
 /** The memo that binds a payment to a quote. Solana: memo instruction. EVM: tx calldata. */
@@ -274,6 +282,24 @@ export const PROJECT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]{1,31}$/;
 
 export function validateProjectName(name: string): string | null {
   if (!PROJECT_NAME_RE.test(name.trim())) return 'project name: 2-32 letters, numbers, spaces, . _ -';
+  return null;
+}
+
+/** Token names and tickers as the API accepts them (the token name is the project name). */
+export const TOKEN_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} ._'!&$-]{1,31}$/u;
+export const TICKER_RE = /^[A-Z0-9]{2,10}$/;
+
+/**
+ * Every name check the API runs on an order, so the site can refuse BEFORE anything is paid.
+ * Returns the offending field and message, or null.
+ */
+export function validateOrderNames(target: Target, projectName: string, tokenName: string, ticker: string): { field: 'name' | 'ticker'; msg: string } | null {
+  const p = validateProjectName(projectName);
+  if (p) return { field: 'name', msg: p };
+  if (!TOKEN_NAME_RE.test(tokenName.trim())) return { field: 'name', msg: 'token name: 2-32 characters' };
+  if (!TICKER_RE.test(ticker)) return { field: 'ticker', msg: 'ticker: 2-10 letters or numbers' };
+  const clash = brandClash(target, tokenName, ticker) ?? brandClash(target, projectName, '');
+  if (clash) return { field: brandClash(target, tokenName, '') || brandClash(target, projectName, '') ? 'name' : 'ticker', msg: clash };
   return null;
 }
 

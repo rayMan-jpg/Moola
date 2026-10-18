@@ -13,9 +13,21 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Machine-readable reason, e.g. 'needs_claim'. */
+    public code?: string,
   ) {
     super(message);
   }
+}
+
+/** The payment lost its rea4u tag: the paying wallet has to sign claimMessage(quote.id, tx). */
+export function needsClaim(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 428 && e.code === 'needs_claim';
+}
+
+/** The engine refused for good (bad quote, wrong payment, late payment...): retrying won't help. */
+export function refused(e: unknown): e is ApiError {
+  return e instanceof ApiError && e.status >= 400 && e.status < 500 && e.status !== 428 && e.status !== 429;
 }
 
 let cached: Promise<SiteConfig | null> | null = null;
@@ -60,8 +72,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new ApiError(0, "can't reach the rea4u engine. check your connection and try again");
   }
-  const body = (await r.json().catch(() => ({}))) as T & { error?: string };
-  if (!r.ok || r.status === 202) throw new ApiError(r.status, body.error ?? `engine said ${r.status}`);
+  const body = (await r.json().catch(() => ({}))) as T & { error?: string; code?: string };
+  if (!r.ok || r.status === 202) throw new ApiError(r.status, body.error ?? `engine said ${r.status}`, body.code);
   return body;
 }
 
@@ -92,47 +104,63 @@ export async function checkQuote(q: Quote, chain: ChainId) {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Registers the paid job. The engine answers 202 until the payment is confirmed; keep asking. */
-export async function createJob(req: JobRequest, onWait?: (msg: string) => void, timeoutMs = 120_000): Promise<JobView> {
+/**
+ * Keeps POSTing while the engine says "not yet" (202), is unreachable, overloaded (5xx) or
+ * rate limiting (429, with backoff). Anything else, including 428 needs_claim, goes to the caller.
+ */
+async function untilAccepted<T>(send: () => Promise<T>, onWait: ((msg: string) => void) | undefined, timeoutMs: number): Promise<T> {
   const until = Date.now() + timeoutMs;
-  for (;;) {
+  for (let limitedFor = 0; ; ) {
     try {
-      return await call<JobView>('/api/jobs', { method: 'POST', body: JSON.stringify(req) });
+      return await send();
     } catch (e) {
-      const retry = e instanceof ApiError && (e.status === 202 || e.status === 0 || e.status >= 500);
+      const status = e instanceof ApiError ? e.status : -1;
+      const retry = status === 202 || status === 0 || status === 429 || status >= 500;
       if (!retry || Date.now() > until) throw e;
-      onWait?.((e as Error).message);
-      await sleep(2500);
+      onWait?.(status === 429 ? 'the engine is busy, retrying...' : (e as Error).message);
+      limitedFor = status === 429 ? limitedFor + 1 : 0;
+      await sleep(limitedFor ? Math.min(20_000, 2500 * 2 ** limitedFor) : 2500);
     }
   }
+}
+
+/** Registers the paid job. The engine answers 202 until the payment is confirmed; keep asking. */
+export function createJob(req: JobRequest, onWait?: (msg: string) => void, timeoutMs = 120_000): Promise<JobView> {
+  return untilAccepted(() => call<JobView>('/api/jobs', { method: 'POST', body: JSON.stringify(req) }), onWait, timeoutMs);
 }
 
 export function getJob(id: string): Promise<JobView> {
   return call<JobView>(`/api/jobs/${encodeURIComponent(id)}`);
 }
 
-export async function topupJob(id: string, quote: Quote, payTx: string, onWait?: (msg: string) => void): Promise<JobView> {
-  const until = Date.now() + 120_000;
-  for (;;) {
-    try {
-      return await call<JobView>(`/api/jobs/${encodeURIComponent(id)}/topup`, { method: 'POST', body: JSON.stringify({ quote, payTx }) });
-    } catch (e) {
-      const retry = e instanceof ApiError && (e.status === 202 || e.status === 0 || e.status === 503 || e.status >= 500);
-      if (!retry || Date.now() > until) throw e;
-      onWait?.((e as Error).message);
-      await sleep(2500);
-    }
-  }
+export interface TopupRequest {
+  quote: Quote;
+  payTx: string;
+  /** Same as JobRequest.claimSig, for a top-up payment that lost its tag. */
+  claimSig?: string;
 }
 
-export async function recordToken(id: string, body: { mint?: string; tx?: string; url?: string; armTx?: string; failed?: boolean }): Promise<JobView> {
-  // The launch tx can take a few seconds to show up on the API's RPC.
-  for (let i = 0; ; i++) {
+export function topupJob(id: string, req: TopupRequest, onWait?: (msg: string) => void, timeoutMs = 120_000): Promise<JobView> {
+  const body = JSON.stringify({ quote: req.quote, payTx: req.payTx, ...(req.claimSig ? { claimSig: req.claimSig } : {}) });
+  return untilAccepted(() => call<JobView>(`/api/jobs/${encodeURIComponent(id)}/topup`, { method: 'POST', body }), onWait, timeoutMs);
+}
+
+export interface TokenProof {
+  mint: string;
+  tx: string;
+  url?: string;
+  armTx?: string;
+}
+
+export async function recordToken(id: string, proof: TokenProof, tries = 6): Promise<JobView> {
+  // The launch tx can take a few seconds to show up on the API's RPC (400 until then).
+  for (let i = 1; ; i++) {
     try {
-      return await call<JobView>(`/api/jobs/${encodeURIComponent(id)}/token`, { method: 'POST', body: JSON.stringify(body) });
+      return await call<JobView>(`/api/jobs/${encodeURIComponent(id)}/token`, { method: 'POST', body: JSON.stringify(proof) });
     } catch (e) {
-      if (i >= 5 || !(e instanceof ApiError) || (e.status !== 400 && e.status < 500)) throw e;
-      await sleep(3000);
+      const s = e instanceof ApiError ? e.status : -1;
+      if (i >= tries || !(s === 0 || s === 400 || s === 429 || s >= 500)) throw e;
+      await sleep(s === 429 ? 6000 : 3000);
     }
   }
 }
@@ -157,8 +185,16 @@ export function myJobs(): MyJob[] {
 }
 
 export function rememberJob(j: MyJob) {
+  saveMine([j, ...myJobs().filter((x) => x.id !== j.id)].slice(0, 50));
+}
+
+/** For a payment that provably never happened. */
+export function forgetJob(id: string) {
+  saveMine(myJobs().filter((x) => x.id !== id));
+}
+
+function saveMine(list: MyJob[]) {
   try {
-    const list = [j, ...myJobs().filter((x) => x.id !== j.id)].slice(0, 50);
     localStorage.setItem(MINE, JSON.stringify(list));
   } catch {
     /* private mode */

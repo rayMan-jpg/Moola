@@ -5,7 +5,7 @@ import { myJobs } from './api';
 import { initEngineRoom } from './engineRoom';
 import { initOrder, orderBusy } from './order';
 import { PADS } from './pads';
-import { showProject, stopProject } from './project';
+import { projectBusy, setProjectNotice, showProject, stopProject } from './project';
 import { DEFAULT_RPCS, rpcUrls, setCustomRpc } from './rpc';
 import { $, esc, framed, hideModal, openModal, reducedMotion, toast } from './ui';
 import { balanceText, onWalletChange, silentReconnect, walletLabel, walletMenu } from './wallets';
@@ -83,9 +83,14 @@ async function boot() {
     document.body.innerHTML = `<main class="hero"><h1>NOPE</h1><p>rea4u doesn't run inside other sites. <a href="${esc(location.href)}" target="_blank" rel="noopener">Open rea4u directly</a>.</p></main>`;
     return;
   }
+  // A wallet flow in progress (order or project-page top-up/launch): ask before leaving.
+  window.addEventListener('beforeunload', (e) => {
+    if (orderBusy() || projectBusy()) e.preventDefault();
+  });
   renderStatsAndMarquee(71, 311);
   route();
-  await initOrder((jobId) => {
+  await initOrder((jobId, message) => {
+    if (message) setProjectNotice(jobId, message);
     location.hash = `#/p/${jobId}`;
   });
   const cat = await initEngineRoom();
@@ -93,8 +98,5 @@ async function boot() {
   // Warm the pump.fun SDK chunk so the first order doesn't wait on it.
   setTimeout(() => import('./launchpads/pumpSdk').catch(() => undefined), 1500);
   await silentReconnect();
-  window.addEventListener('beforeunload', (e) => {
-    if (orderBusy()) e.preventDefault();
-  });
 }
 boot();

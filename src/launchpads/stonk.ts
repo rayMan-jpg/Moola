@@ -20,7 +20,11 @@ export const STONK_ABI = parseAbi([
   'function launchFeeWei() view returns (uint256)',
   'event LaunchCreated(uint256 indexed id, address indexed token, address indexed creator, bool externalToken)',
 ]);
-const ERC20 = parseAbi(['function approve(address spender, uint256 amount) returns (bool)']);
+const ERC20 = parseAbi([
+  'function approve(address spender, uint256 amount) returns (bool)',
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function balanceOf(address owner) view returns (uint256)',
+]);
 
 /** The site's "degen" preset: $1k start, $50k graduation, flat 1% tax, everything loaded. */
 export function stonkCreateParams(name: string, symbol: string) {
@@ -74,6 +78,26 @@ export function stonkFollowUps(id: bigint, token: string): { label: string; tx: 
 }
 
 const hex = (n: bigint) => `0x${n.toString(16)}`;
+
+async function readUint(to: string, data: `0x${string}`): Promise<bigint | null> {
+  const out = await evmRpc<string>('eth_call', [{ to, data }, 'latest']).catch(() => '0x');
+  return /^0x[0-9a-fA-F]{64}/.test(out) ? BigInt(out.slice(0, 66)) : null;
+}
+
+/**
+ * Finishing a launch whose createLaunch is already mined: what is left of approve + arm, never a
+ * new createLaunch. Skips the approve when it already landed. Empty when the supply has already
+ * left the creator's wallet (armed already). Unreadable state means "send both".
+ */
+export async function stonkRemainingSteps(id: bigint, token: string, owner: string): Promise<{ label: string; tx: EvmTx }[]> {
+  const [approve, arm] = stonkFollowUps(id, token);
+  const [balance, allowance] = await Promise.all([
+    readUint(token, encodeFunctionData({ abi: ERC20, functionName: 'balanceOf', args: [getAddress(owner)] })),
+    readUint(token, encodeFunctionData({ abi: ERC20, functionName: 'allowance', args: [getAddress(owner), STONK_PAD] })),
+  ]);
+  if (balance !== null && balance < STONK_SUPPLY) return [];
+  return allowance !== null && allowance >= STONK_SUPPLY ? [arm] : [approve, arm];
+}
 
 /** Dry-runs create -> approve -> arm in one simulated block. Throws the revert if any step fails. */
 export async function simulateStonk(from: string, create: EvmTx): Promise<{ id: bigint; token: string }> {

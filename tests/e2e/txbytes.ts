@@ -63,3 +63,24 @@ export function signatureOf(tx: Uint8Array): Uint8Array {
   const { sigStart } = layout(tx);
   return tx.slice(sigStart, sigStart + 64);
 }
+
+/** Program ids of a serialized transaction's top-level instructions (programs are always static keys). */
+export function programIds(tx: Uint8Array): Uint8Array[] {
+  const { msgStart } = layout(tx);
+  const versioned = (tx[msgStart] & 0x80) !== 0;
+  const headerAt = msgStart + (versioned ? 1 : 0);
+  const [count, sz] = shortVec(tx, headerAt + 3);
+  let off = headerAt + 3 + sz + 32 * count + 32; // account keys, then the recent blockhash
+  const { keys } = staticKeys(tx);
+  const [n, nsz] = shortVec(tx, off);
+  off += nsz;
+  const out: Uint8Array[] = [];
+  for (let i = 0; i < n; i++) {
+    out.push(keys[tx[off]]);
+    const [accounts, asz] = shortVec(tx, off + 1);
+    off += 1 + asz + accounts;
+    const [data, dsz] = shortVec(tx, off);
+    off += dsz + data;
+  }
+  return out;
+}

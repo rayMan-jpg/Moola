@@ -6,8 +6,13 @@ import type { Env } from './env';
 import { usdPrice } from './price';
 
 export const QUOTE_TTL_MS = 10 * 60_000;
-/** A payment may land this long after the quote expired (slow wallets, slow blocks). */
+/** An untagged (claimed) payment may land this long after the quote expired (slow wallets, slow blocks). */
 export const PAY_GRACE_MS = 3 * 60_000;
+/**
+ * A payment tagged with the quote's id may land this long after expiry: a wallet popup can sit open
+ * for ages and EVM txs never expire. The HMAC'd id binds it and the payments table stops replays.
+ */
+export const TAGGED_GRACE_MS = 24 * 60 * 60_000;
 export const TOPUP_MIN_CENTS = 200;
 export const TOPUP_MAX_CENTS = 20_000;
 
@@ -15,6 +20,8 @@ export class HttpError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Machine-readable reason the client acts on, e.g. 'needs_claim'. */
+    public code?: string,
   ) {
     super(message);
   }
@@ -143,13 +150,6 @@ export async function makeQuote(req: QuoteRequest, env: Env, deps: QuoteDeps): P
     usdCents = TIERS[tier].usdCents;
   }
 
-  let payer: string | undefined;
-  if (req.payer !== undefined) {
-    const ok = chain === 'solana' ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(req.payer) : /^0x[0-9a-fA-F]{40}$/.test(req.payer);
-    if (!ok) throw new HttpError(400, 'bad payer address');
-    payer = chain === 'solana' ? req.payer : req.payer.toLowerCase();
-  }
-
   const margin = Math.max(0, Number(env.MARGIN_PCT ?? 0) || 0);
   const chargeCents = Math.ceil(usdCents * (1 + margin / 100));
   const asset = CHAIN_ASSET[chain];
@@ -170,7 +170,6 @@ export async function makeQuote(req: QuoteRequest, env: Env, deps: QuoteDeps): P
       priceUsd: price,
       treasury,
       ...(evmChainId ? { evmChainId } : {}),
-      ...(payer ? { payer } : {}),
       issuedAt: now,
       expiresAt: now + QUOTE_TTL_MS,
     },
