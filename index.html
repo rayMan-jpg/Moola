@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>rea4u: reverse engineer anything</title>
+    <meta name="description" content="Paste any app, repo or website. rea4u's ECC-powered engine rebuilds it as your own project: working clone, full spec and one-click hosting. Your token launches on pump.fun, Pons and friends in the same go." />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta property="og:title" content="rea4u: reverse engineer anything. for you." />
+    <meta property="og:description" content="Paste a repo or a website. Get a rebranded working clone, a full spec, hosting options and a token, in one go." />
+    <script>
+      // Older iOS/Safari (< 15.4) lack these; the crypto libs need Object.hasOwn at load time.
+      if (!Object.hasOwn) Object.hasOwn = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+    </script>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='6' y='6' width='88' height='88' rx='22' fill='%2339ff14' stroke='%230a0a0a' stroke-width='8'/><text x='50' y='68' font-size='50' text-anchor='middle' font-family='Impact' fill='%230a0a0a'>r4u</text></svg>" />
+    <script type="module" crossorigin src="./assets/index-CG3IcRHK.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BkFTRTZ1.css">
+  </head>
+  <body>
+    <div class="marquee" aria-hidden="true">
+      <div class="marquee__track" id="marquee"></div>
+    </div>
+
+    <header class="header">
+      <a class="logo" href="#/" aria-label="rea4u home"><span class="logo__coin" aria-hidden="true">⚙</span>rea4u</a>
+      <nav class="header__right" aria-label="Account">
+        <button class="btn btn--small btn--ghost" id="mine-btn" type="button">My reas</button>
+        <span class="mono" id="balance" hidden></span>
+        <button class="btn btn--small" id="wallet-btn" type="button">Connect wallet</button>
+      </nav>
+    </header>
+
+    <div id="order-view">
+      <section class="hero" id="top">
+        <h1>REVERSE ENGINEER <span class="hl">ANYTHING.</span><br />FOR YOU.</h1>
+        <p>Paste any app, repo or website. Our <a href="#engine">ECC-powered engine</a> rebuilds it as <b>your</b> project: a working, rebranded clone, the full spec, and hosting that fits. Your project's token launches on <span id="pad-names">pump.fun</span> in the same go.</p>
+        <div class="hero__stats" id="stats"></div>
+        <div class="alert" id="engine-banner" hidden></div>
+      </section>
+
+      <main class="order-wrap">
+        <form class="panel order" id="order" novalidate aria-labelledby="order-title">
+          <h2 class="panel__title" id="order-title">THE REA ORDER <small id="order-sub">1 form, 1 payment</small></h2>
+          <fieldset id="order-fields" class="bare">
+            <section class="step" aria-labelledby="s1">
+              <h3 class="step__title" id="s1"><span class="step__n">1</span>What are we rea-ing?</h3>
+              <label class="field">
+                <span class="sr-only">GitHub repo or website</span>
+                <input class="input input--target" id="target" name="target" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github.com/owner/repo or any-site.com" aria-describedby="target-err target-info" />
+                <span class="field__err" id="target-err" role="alert"></span>
+              </label>
+              <div class="chips picks" id="picks" aria-label="Popular picks"></div>
+              <p class="target-info" id="target-info" aria-live="polite"></p>
+            </section>
+
+            <section class="step" aria-labelledby="s2">
+              <h3 class="step__title" id="s2"><span class="step__n">2</span>How deep?</h3>
+              <div class="pads tiers" id="tiers" role="radiogroup" aria-labelledby="s2"></div>
+            </section>
+
+            <section class="step" aria-labelledby="s3">
+              <h3 class="step__title" id="s3"><span class="step__n">3</span>Your version</h3>
+              <div class="art">
+                <div>
+                  <canvas id="art-canvas" width="512" height="512" role="img" aria-label="Generated token logo"></canvas>
+                  <img id="art-upload" alt="Your uploaded token logo" hidden />
+                </div>
+                <div class="art__actions">
+                  <button class="btn btn--small btn--yellow" type="button" id="reroll">Reroll name + logo</button>
+                  <label class="btn btn--small btn--ghost" for="image-input">Upload own logo</label>
+                  <input class="sr-only" type="file" id="image-input" accept="image/png,image/jpeg,image/gif,image/webp" />
+                  <span class="art__hint" id="art-hint" aria-live="polite"></span>
+                </div>
+              </div>
+              <div class="row">
+                <label class="field">
+                  <span class="field__label">Project + token name</span>
+                  <input class="input" id="name" name="name" autocomplete="off" maxlength="32" required aria-describedby="name-err" />
+                  <span class="field__err" id="name-err" role="alert"></span>
+                </label>
+                <label class="field">
+                  <span class="field__label">Ticker</span>
+                  <input class="input input--ticker" id="ticker" name="ticker" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="10" required aria-describedby="ticker-err" />
+                  <span class="field__err" id="ticker-err" role="alert"></span>
+                </label>
+              </div>
+            </section>
+
+            <section class="step" aria-labelledby="s4">
+              <h3 class="step__title" id="s4"><span class="step__n">4</span>Launch the token on</h3>
+              <div class="pads" id="pads" role="radiogroup" aria-labelledby="s4"></div>
+              <div class="field">
+                <span class="field__label" id="buy-label">Dev buy <span class="count" id="buy-unit">SOL, optional</span></span>
+                <div class="chips" id="buy-chips" role="group" aria-labelledby="buy-label"></div>
+              </div>
+            </section>
+
+            <section class="step" aria-labelledby="s5">
+              <h3 class="step__title" id="s5"><span class="step__n">5</span>Hosting vibe</h3>
+              <p class="art__hint">We match hosts to what the clone actually needs once it's built. Tell us what you want:</p>
+              <div class="needs">
+                <div class="chips" role="group" aria-label="Hosting budget" id="need-budget"></div>
+                <div class="chips" role="group" aria-label="Expected traffic" id="need-traffic"></div>
+                <label class="toggle"><input type="checkbox" id="need-domain" /> <span>I'll use my own domain</span></label>
+              </div>
+            </section>
+          </fieldset>
+
+          <div class="summary" id="summary"></div>
+          <button class="btn btn--huge" id="rea-it" type="submit">REA IT</button>
+          <ol class="steps" id="steps" hidden></ol>
+          <div id="order-msg" aria-live="assertive"></div>
+          <p class="disclaimer">You sign everything in your own wallet. The payment covers the engine's Claude budget for this job, hard-capped at what you paid. The engine studies public info only, rebrands everything, and refuses clones made to impersonate or scam. Tokens are casino chips, not financial advice.</p>
+        </form>
+      </main>
+
+      <section class="how" id="how" aria-labelledby="how-title">
+        <h2 class="panel__title" id="how-title">HOW IT WORKS</h2>
+        <ol class="how__grid">
+          <li class="panel"><b>Paste</b>Any GitHub repo, web app or site. Pick how deep, name your version, pick a launchpad.</li>
+          <li class="panel"><b>Pay + launch</b>One payment funds the engine's AI budget (in SOL or ETH). Your token launches with your project page as its website.</li>
+          <li class="panel"><b>Get it</b>Live engine feed, then a GitHub repo with the working clone, SPEC.md, and one-click deploys ranked for your needs.</li>
+        </ol>
+      </section>
+
+      <section class="panel engine" id="engine" aria-labelledby="engine-title">
+        <h2 class="panel__title" id="engine-title">THE ENGINE ROOM <small>our fork of ECC · the playbooks the engine runs on</small></h2>
+        <div class="catalog__bar">
+          <div class="tabs" role="group" aria-label="Engine section" id="tabs"></div>
+          <input class="input search" id="search" type="search" placeholder="search agents, skills, commands..." aria-label="Search the engine room" />
+        </div>
+        <p class="sr-only" id="grid-count" aria-live="polite"></p>
+        <div class="grid" id="grid"></div>
+        <button class="btn btn--ghost more-btn" id="more" type="button" hidden>Show more</button>
+      </section>
+    </div>
+
+    <main class="project-wrap" id="project-view" hidden></main>
+
+    <footer class="footer">
+      <p>rea4u's engine runs on an unofficial fork of <a href="https://github.com/affaan-m/ECC" target="_blank" rel="noopener">ECC by affaan-m</a>, used under the <a href="https://github.com/affaan-m/ECC/blob/main/LICENSE" target="_blank" rel="noopener">MIT license</a> (© 2026 Affaan Mustafa), and on Claude. Not affiliated with or endorsed by ECC, Anthropic, any launchpad, or any product you rea. Clones are clean-room rebuilds from public info or license-respecting forks; you're responsible for how you use yours.</p>
+      <p>Launches go straight to each launchpad's own contracts through your wallet. <a href="https://github.com/rayman-jpg/Moola" target="_blank" rel="noopener">Source</a> · <button class="btn btn--small btn--ghost" type="button" id="rpc-btn">RPC settings</button></p>
+    </footer>
+
+    <div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="panel modal__box">
+        <h2 class="panel__title" id="modal-title"></h2>
+        <div id="modal-content"></div>
+        <p style="margin-top: 14px; text-align: right"><button class="btn btn--ghost btn--small" type="button" data-close>Close</button></p>
+      </div>
+    </div>
+
+    <div class="send-bar" id="send-bar" hidden><button class="btn btn--huge" id="send-bar-btn" type="button">REA IT</button></div>
+    <div class="toast" id="toast" hidden aria-hidden="true"></div>
+    <div class="sr-only" id="sr-status" role="status" aria-live="polite"></div>
+  </body>
+</html>
