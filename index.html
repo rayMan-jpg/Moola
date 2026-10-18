@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MOOLA — turn any AI agent into a coin</title>
+    <meta name="description" content="Degen fork of ECC. Pick one of 71 agents or 311 skills, we meme it, you launch it on pump.fun, Bonk or Jupiter in one wallet signature." />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta property="og:title" content="MOOLA — 1 click = 1 coin" />
+    <meta property="og:description" content="Turn any AI agent into a Solana coin. Launch on pump.fun, Bonk or Jupiter in one signature." />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%23ffe600' stroke='%230a0a0a' stroke-width='8'/><text x='50' y='68' font-size='54' text-anchor='middle' font-family='Impact' fill='%230a0a0a'>$</text></svg>" />
+  </head>
+  <body>
+    <div class="marquee" aria-hidden="true">
+      <div class="marquee__track" id="marquee"></div>
+    </div>
+
+    <header class="header">
+      <a class="logo" href="#top" aria-label="MOOLA home"><span class="logo__coin" aria-hidden="true">$</span>MOOLA</a>
+      <div class="header__right">
+        <span class="mono" id="balance" hidden></span>
+        <button class="btn btn--small" id="wallet-btn" type="button">Connect wallet</button>
+      </div>
+    </header>
+
+    <section class="hero" id="top">
+      <h1>ANY AI AGENT.<br /><span class="hl">ONE CLICK.</span> NOW IT'S A COIN.</h1>
+      <p>We forked <a href="https://github.com/affaan-m/ECC" target="_blank" rel="noopener">ECC</a>'s whole agent arsenal and gave it a ticker. Pick an agent, we cook the name, logo and lore, you send it to pump.fun, Bonk or Jupiter with <b>one wallet signature</b>. no forms. no brakes.</p>
+      <div class="hero__stats" id="stats"></div>
+    </section>
+
+    <main class="main">
+      <section class="panel launcher" id="launch" aria-labelledby="launch-title">
+        <h2 class="panel__title" id="launch-title">THE LAUNCH PAD <small>3 fields, 1 signature</small></h2>
+
+        <form id="launch-form" novalidate>
+          <div class="art">
+            <div>
+              <canvas id="art-canvas" width="512" height="512" role="img" aria-label="Generated coin logo"></canvas>
+              <img id="art-upload" alt="Your uploaded coin logo" hidden />
+            </div>
+            <div class="art__actions">
+              <button class="btn btn--small btn--yellow" type="button" id="reroll">Reroll the meme</button>
+              <label class="btn btn--small btn--ghost" for="image-input">Upload own pic</label>
+              <input class="sr-only" type="file" id="image-input" accept="image/png,image/jpeg,image/gif,image/webp" />
+              <span class="art__hint" id="art-hint">auto-generated logo. or upload a png/jpg/gif under 4 MB.</span>
+            </div>
+          </div>
+
+          <div class="row">
+            <label class="field">
+              <span class="field__label">Name <span class="count" id="name-count"></span></span>
+              <input class="input" id="name" name="name" autocomplete="off" maxlength="40" required />
+              <span class="field__err" id="name-err" role="alert"></span>
+            </label>
+            <label class="field">
+              <span class="field__label">Ticker</span>
+              <input class="input input--ticker" id="ticker" name="ticker" autocomplete="off" maxlength="10" required />
+              <span class="field__err" id="ticker-err" role="alert"></span>
+            </label>
+          </div>
+
+          <details class="more">
+            <summary>Lore + socials (optional)</summary>
+            <label class="field">
+              <span class="field__label">Description <span class="count" id="desc-count"></span></span>
+              <textarea class="input" id="description" name="description" rows="3"></textarea>
+              <span class="field__err" id="description-err" role="alert"></span>
+            </label>
+            <label class="field"><span class="field__label">X / Twitter</span><input class="input" id="twitter" type="url" inputmode="url" placeholder="https://x.com/..." /></label>
+            <label class="field"><span class="field__label">Telegram</span><input class="input" id="telegram" type="url" inputmode="url" placeholder="https://t.me/..." /></label>
+            <label class="field"><span class="field__label">Website</span><input class="input" id="website" type="url" inputmode="url" placeholder="https://..." /></label>
+          </details>
+
+          <div class="field">
+            <span class="field__label" id="pads-label">Launchpad</span>
+            <div class="pads" id="pads" role="radiogroup" aria-labelledby="pads-label"></div>
+          </div>
+
+          <div class="field">
+            <span class="field__label" id="buy-label">Dev buy (SOL) <span class="count">optional</span></span>
+            <div class="chips" id="buy-chips" role="group" aria-labelledby="buy-label"></div>
+          </div>
+
+          <div class="summary" id="summary" aria-live="polite"></div>
+
+          <button class="btn btn--huge" id="send-it" type="submit">SEND IT</button>
+          <ol class="steps" id="steps" hidden>
+            <li data-step="upload">Uploading meme to IPFS</li>
+            <li data-step="build">Cooking the transaction</li>
+            <li data-step="sign">Sign in your wallet</li>
+            <li data-step="confirm">Waiting for the chain</li>
+          </ol>
+          <div id="launch-msg" aria-live="assertive"></div>
+          <p class="disclaimer">You sign every transaction in your own wallet. MOOLA never touches your keys or funds. Memecoins are casino chips, not financial advice.</p>
+        </form>
+
+        <div class="result" id="result" hidden></div>
+      </section>
+
+      <section class="panel" id="catalog" aria-labelledby="catalog-title">
+        <h2 class="panel__title" id="catalog-title">THE ARSENAL <small>forked from ECC · pick one to meme it</small></h2>
+        <div class="catalog__bar">
+          <div class="tabs" role="tablist" id="tabs"></div>
+          <input class="input search" id="search" type="search" placeholder="search agents, skills, commands..." aria-label="Search the arsenal" />
+        </div>
+        <div class="grid" id="grid" aria-live="polite"></div>
+        <button class="btn btn--ghost more-btn" id="more" type="button" hidden>Show more</button>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>MOOLA is a degen fork of <a href="https://github.com/affaan-m/ECC" target="_blank" rel="noopener">ECC by affaan-m</a> (MIT). Catalog content © its authors.</p>
+      <p>Launches go straight to the launchpad's own on-chain program through your wallet. Check the transaction in your wallet before you sign. Nothing here is financial advice. <a href="https://github.com/rayMan-jpg/Moola" target="_blank" rel="noopener">Source</a> · <button class="btn btn--small btn--ghost" type="button" id="rpc-btn">RPC settings</button></p>
+    </footer>
+
+    <div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="panel modal__box">
+        <h2 class="panel__title" id="modal-title"></h2>
+        <div id="modal-content"></div>
+        <p style="margin-top: 14px; text-align: right"><button class="btn btn--ghost btn--small" type="button" data-close>Close</button></p>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" hidden role="status"></div>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
