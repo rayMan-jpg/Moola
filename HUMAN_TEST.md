@@ -25,10 +25,11 @@ Approximate cost per launch, with no dev buy:
 1. Open the URL. You should see a default coin already filled in (Code Reviewer / $CODE) with a generated logo.
 2. In **The Arsenal**, click **Meme it** on any agent. The name, ticker, logo and lore should change, and the page should scroll to the launch pad.
 3. Leave **pump.fun** selected and set the dev buy to **none**.
-4. Click **CONNECT + SEND IT**.
+4. Click **CONNECT + SEND IT** (on a phone it's also pinned to the bottom of the screen).
    - With one wallet installed, its connect popup opens straight away. With several, a picker shows first.
-5. Approve the connection, then approve **one** transaction. Before approving, check what the wallet shows: roughly 0.006 SOL leaving, and no unknown programs or transfers to strangers.
+5. Approve the connection, then approve **one** transaction. Before approving, check what the wallet shows: roughly 0.006 SOL leaving, and no unknown programs or transfers to strangers. Sign within about 30 seconds, because the transaction expires.
 6. The progress steps should complete and you should see **"$TICKER IS LIVE"** with the contract address.
+   - **"IS SENT"** means it was broadcast but the public RPC hasn't confirmed it yet. Check the tx link before launching again.
 7. Click **Open on pump.fun**. The coin page should load with the right name, ticker and logo. The logo can take up to a minute to appear on pump.fun.
 8. Note the contract address and the transaction link.
 
@@ -51,8 +52,17 @@ Select **Bonk.fun** and launch. Expect 1 prompt costing ~0.021 SOL. The mint add
 - **Reject** the wallet prompt. The page should say you rejected it, no SOL should move, and the button should work again.
 - Use an **empty wallet**. The page should say "not enough SOL" **before** any transaction prompt.
 - **Clear the name** and hit SEND IT. You should get an inline error and no prompts.
-- On a **phone browser without a wallet**, hit SEND IT. You should get "Open in Phantom / Solflare / Backpack" buttons. They should reopen MOOLA inside that wallet's browser, and the launch should work from there.
+- On a **phone browser without a wallet**, type a custom name and ticker and hit SEND IT. You should get "Open in Phantom / Solflare / Backpack" buttons. They should reopen MOOLA inside that wallet's browser **with your coin details already filled in** (an uploaded picture needs re-uploading), and the launch should work from there.
+- **Take longer than about a minute** in the wallet prompt before approving. You should get "expired while it waited in your wallet. nothing was sent", and nothing should be charged.
+- **Switch accounts** in the wallet while MOOLA is open. The header should update to the new address.
+- Click your **wallet address** in the header. You should get Copy address / Disconnect options.
 - **Upload your own picture** (png/jpg/gif/webp under 4 MB). It should replace the generated logo and show up on the launchpad after launch.
+
+## Known things to expect
+
+- Your wallet might show a "new or unknown site" warning, because the domain is new. Read the transaction preview, then decide.
+- Ledger and other hardware wallets can't do the Jupiter Studio sign-in message. Use a hot wallet for Jupiter.
+- If anything looks off before the wallet prompt, MOOLA blocks it on purpose with "Aborted before your wallet saw it". MOOLA checks every launch transaction against an allowlist, plus a mainnet simulation of what it spends. Screenshot that error if you see it.
 
 ## What to report
 
