@@ -68,7 +68,7 @@ function env(): Env {
     SOLANA_RPC: 'https://sol.worker.test',
     RH_RPC: 'https://rh.worker.test',
     RH_CHAIN_ID: '4663',
-    SITE_URL: 'http://127.0.0.1:4173/',
+    SITE_URL: process.env.E2E_BASE_URL ?? 'http://127.0.0.1:4173/',
   };
 }
 
