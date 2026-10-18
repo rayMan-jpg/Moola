@@ -56,7 +56,7 @@ Select **Bonk.fun** and launch. Expect 1 prompt costing ~0.021 SOL. The mint add
 - **Take longer than about a minute** in the wallet prompt before approving. You should get "expired while it waited in your wallet. nothing was sent", and nothing should be charged.
 - **Switch accounts** in the wallet while MOOLA is open. The header should update to the new address.
 - Click your **wallet address** in the header. You should get Copy address / Disconnect options.
-- **Upload your own picture** (png/jpg/gif/webp under 4 MB). It should replace the generated logo and show up on the launchpad after launch.
+- **Upload your own picture** (png/jpg/gif/webp, up to 20 MB; it gets shrunk and its EXIF/GPS data stripped). It should replace the generated logo and show up on the launchpad after launch.
 
 ## Known things to expect
 
