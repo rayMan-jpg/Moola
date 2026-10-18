@@ -39,12 +39,14 @@ Solana / Robinhood Chain ◀────────┘ starts / polls / tops up
 ```
 
 - **Quote** (`POST /api/quote`): tier price → SOL/ETH (median of Coinbase, Kraken and Gemini),
-  HMAC-signed, valid for 10 minutes, and bound to the paying wallet.
+  HMAC-signed and valid for 10 minutes.
 - **Payment**: a transfer to the treasury tagged with `rea4u:<quote id>` (a memo on Solana,
   calldata on Robinhood Chain). The worker checks amount, recipient, tag and timing on-chain, and
-  a D1 unique key stops replays. If a wallet drops the tag, the transfer still counts when it
-  comes from the wallet the quote was issued to. The site refuses quotes naming any treasury other than the one
-  pinned in its own `config.json`.
+  a D1 unique key stops replays. If a wallet drops the tag, the worker answers `428 needs_claim`
+  and the page asks the paying wallet to sign a free claim message naming the quote and the tx
+  (accepted only for a transfer sent while the quote was valid). If a wallet speeds up or replaces
+  the payment, the project page asks for the new tx hash. The site refuses quotes naming any
+  treasury other than the one pinned in its own `config.json`.
 - **Engine** (`worker/src/engine.ts`): one persistent Managed Agents agent (`engine/system.ts`),
   and per job its own sandbox environment (egress limited to GitHub, package registries and the
   target), plus a session with a **hard spend cap equal to the payment minus a small reserve**

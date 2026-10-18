@@ -14,7 +14,7 @@ import { handle } from '../../worker/src/index';
 import { MemoryStore } from '../../worker/src/store';
 import { FakeEngine } from '../unit/worker/fakeEngine';
 import type { Env } from '../../worker/src/env';
-import type { Quote } from '../../shared/contract';
+import { payMemo, type Quote } from '../../shared/contract';
 
 const SOL_RPC = 'https://solana-rpc.publicnode.com';
 const RH_RPC = 'https://rpc.mainnet.chain.robinhood.com';
@@ -954,4 +954,81 @@ test('a claim the wallet fails to sign (not a "no") still says the payment went 
   await expect(page.locator('#p-msg')).toContainText("couldn't sign the free claim message");
   expect(w.signs).toBe(2);
   expect(w.evm).toHaveLength(1); // paid once, never asked to pay again
+});
+
+const hashOf = (s: string) => `0x${createHash('sha256').update(s).digest('hex')}`;
+/** A tagged ETH payment to the treasury, as the chain would show the copy a wallet's speed up sent. */
+const spedUp = (q: Quote, seed: string): World['evm'][number] => ({
+  hash: hashOf(seed),
+  tx: { from: EVM_USER, to: TREASURY_EVM, value: `0x${BigInt(q.amount).toString(16)}`, data: `0x${Buffer.from(payMemo(q.id)).toString('hex')}` },
+  logs: [],
+});
+
+test('a payment the wallet sped up (new hash) gets a paste box: the new hash finishes the order, and the same for a top-up', async ({ page }) => {
+  const w = await setup(page, { evm: true });
+  // The payer's account has moved past the saved payments' nonce (5): another tx took that slot.
+  await page.route(`${RH_RPC}/**`, async (route) => {
+    const b = route.request().postDataJSON() as { method: string; id: number };
+    if (b.method !== 'eth_getTransactionCount') return route.fallback();
+    return route.fulfill({ json: { jsonrpc: '2.0', id: b.id, result: '0x6' } });
+  });
+  const ask = workerApi(w);
+  const { quote } = (await (await ask('/api/quote', { target: 'affaan-m/ECC', tier: 'lite', chain: 'robinhood' })).json()) as { quote: Quote };
+  // What a tab closed right after the broadcast leaves behind; the wallet then sped the payment up.
+  const pending = {
+    req: { quote, payTx: hashOf('rea4u e2e payment before speed up'), project: { name: 'Agent Forge' }, token: { name: 'Agent Forge', ticker: 'FORGE', pad: 'pons' }, needs: { budget: 'free', traffic: 'hobby', customDomain: false } },
+    payer: EVM_USER,
+    chain: 'robinhood',
+    nonce: 5,
+    at: Date.now() - 11 * 60_000,
+  };
+  await page.goto('./');
+  await page.evaluate(
+    ([id, p]) => {
+      localStorage.setItem(`rea4u.pending.${id}`, p);
+      localStorage.setItem('rea4u.jobs', JSON.stringify([{ id, project: 'Agent Forge', target: 'affaan-m/ECC', at: Date.now() }]));
+    },
+    [quote.id, JSON.stringify(pending)],
+  );
+  await page.goto(`./#/p/${quote.id}`);
+  await expect(page.locator('#project-view')).toContainText('replaced that payment', { timeout: 90_000 });
+  // Might have charged: still saved, still listed, and nothing says it failed.
+  expect(await stored(page, `rea4u.pending.${quote.id}`)).not.toBeNull();
+  expect(await stored(page, 'rea4u.jobs')).toContain(quote.id);
+
+  await page.locator('#p-replace-hash').fill('not a hash');
+  await page.locator('#p-replace button').click();
+  await expect(page.locator('#toast')).toContainText("that's not a transaction hash");
+
+  const sped = spedUp(quote, 'rea4u e2e sped-up payment');
+  w.evm.push(sped);
+  await page.locator('#p-replace-hash').fill(`0x${sped.hash.slice(2).toUpperCase()}`);
+  await page.locator('#p-replace button').click();
+  await expect(page.locator('#p-title')).toHaveText('Agent Forge', { timeout: 60_000 });
+  expect(await w.store.getJob(quote.id)).toMatchObject({ payer: EVM_USER, payTx: sped.hash });
+  expect(await stored(page, `rea4u.pending.${quote.id}`)).toBeNull();
+
+  // A top-up the wallet sped up: same box, inside the live project page.
+  const budget = (await w.store.getJob(quote.id))!.budgetCents;
+  const { quote: tq } = (await (await ask('/api/quote', { target: 'affaan-m/ECC', tier: 'lite', chain: 'robinhood', topup: quote.id, usdCents: 500 })).json()) as { quote: Quote };
+  const topup = { jobId: quote.id, quote: tq, payTx: hashOf('rea4u e2e top-up before speed up'), payer: EVM_USER, nonce: 5, at: Date.now() - 11 * 60_000 };
+  await page.evaluate(([k, t]) => localStorage.setItem(k, t), [`rea4u.topup.${tq.id}`, JSON.stringify(topup)]);
+  await page.reload();
+  const box = page.locator(`#p-replace-${tq.id}-hash`);
+  await expect(box).toBeVisible({ timeout: 90_000 });
+  await expect(page.locator('#project-view')).toContainText('replaced that top-up');
+
+  // Live updates re-render the page; a hash being pasted stays put.
+  const sped2 = spedUp(tq, 'rea4u e2e sped-up top-up');
+  w.evm.push(sped2);
+  await box.fill(sped2.hash);
+  await page.evaluate(() => document.querySelector<HTMLElement>('#project-view > section')!.setAttribute('data-before', ''));
+  w.engine.snapshot = { status: 'running', spentCents: 120 };
+  await expect(page.locator('#project-view > section[data-before]')).toHaveCount(0, { timeout: 30_000 });
+  await expect(box).toHaveValue(sped2.hash);
+
+  await page.locator(`#p-replace-${tq.id} button`).click();
+  await expect.poll(async () => (await w.store.getJob(quote.id))!.budgetCents, { timeout: 60_000 }).toBeGreaterThan(budget);
+  await expect.poll(() => stored(page, `rea4u.topup.${tq.id}`)).toBeNull();
+  expect(w.prompts).toBe(0); // nothing asked of the wallet, nothing paid again
 });

@@ -126,10 +126,22 @@ async function registerPending(id: string, p: PendingJob, stale: () => boolean):
     return job;
   } catch (e) {
     // A payment that provably never went through stops being shown as paid (and retried) forever.
-    const gone = needsClaim(e) ? null : await goneAfter(e, p.req.quote.chain, p.req.payTx, { blockhash: p.blockhash, at: sentAt({ at: p.at, quote: p.req.quote }) });
-    if (gone) untrack(id);
+    const gone = needsClaim(e)
+      ? null
+      : await goneAfter(e, p.req.quote.chain, p.req.payTx, { blockhash: p.blockhash, at: sentAt({ at: p.at, quote: p.req.quote }), from: p.payer, nonce: p.nonce });
+    if (gone && gone !== 'replaced') untrack(id);
     if (stale()) return null;
-    if (gone) {
+    // What the order flow said earlier ("your payment went through...") no longer holds once we know more.
+    if (gone && notice?.[0] === id) notice = null;
+    if (gone === 'replaced') {
+      renderShell(`<div class="alert">${esc(goneMessage('payment', gone))}</div>${replaceForm('p-replace')}<div id="p-msg" aria-live="assertive"></div>`);
+      bindReplace('p-replace', (hash) => {
+        p.req.payTx = hash;
+        p.at = Date.now();
+        savePending(p);
+        void refresh(id);
+      });
+    } else if (gone) {
       renderShell(`<div class="alert">${esc(goneMessage('payment', gone))} Nothing was launched. <a href="#/">Start a new rea</a>.</div>`);
     } else if (needsClaim(e)) {
       renderShell(`<div class="alert">${PAID}, but your wallet dropped its rea4u tag, so the engine can't match it on its own. Sign a free message with the paying wallet${
@@ -145,6 +157,23 @@ async function registerPending(id: string, p: PendingJob, stale: () => boolean):
     }
     return null;
   }
+}
+
+/** Paste box for the hash of a payment the wallet replaced (speed up). The engine checks it like any payment. */
+function replaceForm(id: string): string {
+  return `<form class="replace" id="${id}"><label class="field"><span class="field__label">Transaction hash that went through</span>
+    <input class="input mono" id="${id}-hash" name="hash" autocomplete="off" spellcheck="false" placeholder="0x..." /></label>
+    <button class="btn btn--small" type="submit">Use this transaction</button></form>`;
+}
+
+function bindReplace(id: string, use: (hash: string) => void) {
+  const form = document.getElementById(id) as HTMLFormElement | null;
+  form?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const hash = String(new FormData(form).get('hash') ?? '').trim();
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) return toast("that's not a transaction hash (0x + 64 hex characters)");
+    use(hash.toLowerCase());
+  });
 }
 
 async function claimPending(id: string, p: PendingJob) {
@@ -175,7 +204,7 @@ async function recover(job: JobView): Promise<JobView> {
   recovering = job.id;
   try {
     for (const t of loadTopups(job.id)) {
-      if (t.rejected || t.needsClaim) continue;
+      if (t.rejected || t.needsClaim || t.replaced) continue;
       try {
         job = await creditTopup(t, { timeoutMs: 15_000 });
         toast(`top-up of ${formatUsd(t.quote.usdCents)} credited. back to work`);
@@ -204,7 +233,7 @@ async function recover(job: JobView): Promise<JobView> {
 }
 
 function owesEngine(id: string): boolean {
-  return loadTopups(id).some((t) => !t.rejected && !t.needsClaim) || loadLaunch(id)?.kind === 'record';
+  return loadTopups(id).some((t) => !t.rejected && !t.needsClaim && !t.replaced) || loadLaunch(id)?.kind === 'record';
 }
 
 const proofOf = (l: UnrecordedLaunch): TokenProof => ({ mint: l.mint, tx: l.tx, url: l.url, armTx: l.armTx });
@@ -245,6 +274,8 @@ function render(job: JobView, force = false) {
   const focus = same && active && root.contains(active) ? focusKey(active) : '';
   const specWasOpen = root.querySelector<HTMLDetailsElement>('details.spec')?.open;
   const keepSpec = same && rendered.status === job.status && specWasOpen !== undefined;
+  // A hash being pasted into a replace box survives the live updates.
+  const typed = same ? [...root.querySelectorAll<HTMLInputElement>('form.replace input')].map((i) => [i.id, i.value] as const) : [];
   rendered = { key, id: job.id, status: job.status };
 
   const [label, color] = STATUS[job.status];
@@ -293,6 +324,10 @@ function render(job: JobView, force = false) {
 
   const spec = root.querySelector<HTMLDetailsElement>('details.spec');
   if (spec && keepSpec) spec.open = !!specWasOpen;
+  for (const [inputId, value] of typed) {
+    const el = document.getElementById(inputId) as HTMLInputElement | null;
+    if (el) el.value = value;
+  }
   if (focus) root.querySelector<HTMLElement>(focus)?.focus({ preventScroll: true });
 
   $('p-share').addEventListener('click', () => copy(projectUrl(job.id), 'link copied'));
@@ -309,6 +344,12 @@ function render(job: JobView, force = false) {
   document.getElementById('p-copy-ca')?.addEventListener('click', () => copy(job.token.mint ?? '', 'address copied'));
   root.querySelectorAll<HTMLElement>('[data-topup]').forEach((b) => b.addEventListener('click', () => doTopup(job, Number(b.dataset.topup))));
   root.querySelectorAll<HTMLElement>('[data-claim-topup]').forEach((b) => b.addEventListener('click', () => claimTopup(job, b.dataset.claimTopup!)));
+  for (const t of topups.filter((x) => x.replaced)) {
+    bindReplace(`p-replace-${t.quote.id}`, (hash) => {
+      saveTopup({ ...t, payTx: hash, at: Date.now(), replaced: undefined });
+      void refresh(job.id);
+    });
+  }
   root.querySelectorAll<HTMLElement>('[data-dismiss-topup]').forEach((b) =>
     b.addEventListener('click', () => {
       clearTopup(b.dataset.dismissTopup!);
@@ -328,6 +369,9 @@ function topupNote(job: JobView, t: PendingTopup) {
   if (t.rejected) {
     return `<div class="alert">Your +${amount} top-up payment (${tx}) went through, but the engine refused it: ${esc(t.rejected)}. Don't pay again; contact support with the tx.
       <button class="btn btn--small btn--ghost" type="button" data-dismiss-topup="${esc(t.quote.id)}">Dismiss</button></div>`;
+  }
+  if (t.replaced) {
+    return `<div class="alert">${esc(goneMessage('top-up', 'replaced'))}${replaceForm(`p-replace-${t.quote.id}`)}</div>`;
   }
   if (t.needsClaim) {
     return `<div class="alert">Your +${amount} top-up payment (${tx}) went through, but your wallet dropped its rea4u tag. Sign a free message with the paying wallet (<span class="mono">${esc(shortAddr(t.payer))}</span>) to claim it.

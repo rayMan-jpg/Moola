@@ -377,6 +377,8 @@ details.more[open] summary { margin-bottom: 10px; }
 .host code { display: block; padding: 6px; background: #111; border-radius: 8px; font-size: 16px; word-break: break-all; color: var(--cyan); }
 .host .btn { align-self: flex-start; }
 .topup .chips { margin-top: 8px; }
+.replace { margin-top: 10px; display: grid; gap: 6px; }
+.replace .btn { justify-self: start; }
 .spec { margin-top: 18px; }
 .md { font-weight: 400; font-size: 15px; color: #ddd; line-height: 1.6; overflow-wrap: anywhere; }
 .md h2, .md h3, .md h4, .md h5, .md h6 { font-family: var(--display); font-weight: 400; letter-spacing: 0.04em; color: var(--yellow); margin: 18px 0 6px; }

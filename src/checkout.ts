@@ -127,14 +127,24 @@ const CLAIM_NOTE = `${PAID}, but your wallet dropped its rea4u tag. sign the fre
 const CLAIM_LATER = `${PAID}, but your wallet dropped its rea4u tag, so the engine needs a claim signature. sign it on the project page (free, no new payment).`;
 
 // ── registering a paid job ──
-function pendingJob(o: OrderInput, quote: Quote, payTx: string, payer: string, blockhash?: string): PendingJob {
+function pendingJob(o: OrderInput, quote: Quote, payTx: string, payer: string, blockhash?: string, nonce?: number): PendingJob {
   return {
     req: { quote, payTx, project: { name: o.name }, token: { name: o.name, ticker: o.ticker, pad: o.pad.id }, needs: o.needs },
     payer,
     chain: quote.chain,
     ...(blockhash ? { blockhash } : {}),
+    ...(nonce !== undefined ? { nonce } : {}),
     at: Date.now(),
   };
+}
+
+/** The account's next nonce, read just before an EVM payment: that's the nonce the payment will use. */
+async function nextNonce(address: string): Promise<number | undefined> {
+  try {
+    return Number(BigInt(await evmRpc<string>('eth_getTransactionCount', [address, 'pending'])));
+  } catch {
+    return undefined;
+  }
 }
 
 /** Saved before the payment is even confirmed: a closed tab or a timeout can't lose it. */
@@ -160,7 +170,8 @@ function notOnChainYet(e: unknown): boolean {
   return e instanceof ApiError && e.status === 202;
 }
 
-export type Gone = 'failed' | 'expired' | 'dropped';
+/** 'replaced' is the odd one out: the wallet swapped the tx for another (speed up), which may have charged. */
+export type Gone = 'failed' | 'expired' | 'dropped' | 'replaced';
 
 // A transaction the RPCs don't know may still be propagating (or, on Solana, carry a newer blockhash
 // than ours if the wallet swapped it), so a fresh one never counts as gone.
@@ -172,7 +183,7 @@ const EVM_GONE_AFTER_MS = 10 * 60_000;
  * 'expired' (Solana: its blockhash died and no node has the signature) or 'dropped' (EVM: no RPC
  * knows the hash any more). Null while it could still land, and whenever the chain can't tell.
  */
-export async function txGone(chain: ChainId, tx: string, opts: { blockhash?: string; at: number }): Promise<Gone | null> {
+export async function txGone(chain: ChainId, tx: string, opts: GoneOpts): Promise<Gone | null> {
   try {
     if (chain === 'solana') {
       if (!opts.blockhash || Date.now() - opts.at < SOL_GONE_AFTER_MS) return null;
@@ -182,20 +193,37 @@ export async function txGone(chain: ChainId, tx: string, opts: { blockhash?: str
     const r = await evmRpc<EvmReceipt | null>('eth_getTransactionReceipt', [tx]);
     if (r) return r.status === '0x1' ? null : 'failed';
     if (Date.now() - opts.at < EVM_GONE_AFTER_MS) return null;
-    return (await txState(tx)) === 'gone' ? 'dropped' : null;
+    if ((await txState(tx)) !== 'gone') return null;
+    // Unknown hash, but the sender's nonce moved past ours: another tx took its place (speed up / cancel).
+    if (opts.from && opts.nonce !== undefined) {
+      const used = Number(BigInt(await evmRpc<string>('eth_getTransactionCount', [opts.from, 'latest'])));
+      if (used > opts.nonce) return 'replaced';
+    }
+    return 'dropped';
   } catch {
     return null;
   }
 }
 
+export interface GoneOpts {
+  blockhash?: string;
+  at: number;
+  /** EVM: the paying address and the payment's nonce, to tell "replaced" from "dropped". */
+  from?: string;
+  nonce?: number;
+}
+
 export function goneMessage(what: 'payment' | 'top-up', gone: Gone): string {
+  if (gone === 'replaced') {
+    return `your wallet replaced that ${what} with a new transaction (speed up or cancel), so it has a new hash. if the new one went through, paste its hash on the project page to finish (no new payment). if you cancelled it, nothing was charged.`;
+  }
   if (gone === 'failed') return `that ${what} failed on-chain, so nothing was charged (just the network fee).`;
   if (gone === 'expired') return `that ${what} never landed (it expired before it confirmed), so nothing was charged.`;
   return `that ${what} never made it on-chain (dropped, or replaced with speed up / cancel in your wallet), so nothing was charged for it. if your wallet shows a sped-up copy that went through, contact support with that tx instead of paying again.`;
 }
 
 /** Checks a payment the engine couldn't register: did it go through at all? */
-export async function goneAfter(e: unknown, chain: ChainId, tx: string, opts: { blockhash?: string; at: number }): Promise<Gone | null> {
+export async function goneAfter(e: unknown, chain: ChainId, tx: string, opts: GoneOpts): Promise<Gone | null> {
   if (failedOnChain(e)) return 'failed';
   return notOnChainYet(e) ? txGone(chain, tx, opts) : null;
 }
@@ -239,7 +267,9 @@ async function register(pending: PendingJob, h: Hooks, claim: () => Promise<stri
     return null;
   } catch (e) {
     if (claiming) return claimFailure(e, CLAIM_LATER);
-    const gone = await goneAfter(e, req.quote.chain, req.payTx, { blockhash: pending.blockhash, at: sentAt({ at: pending.at, quote: req.quote }) });
+    const gone = await goneAfter(e, req.quote.chain, req.payTx, { blockhash: pending.blockhash, at: sentAt({ at: pending.at, quote: req.quote }), from: pending.payer, nonce: pending.nonce });
+    // Replaced may have charged: keep it; the project page asks for the new hash.
+    if (gone === 'replaced') return goneMessage('payment', gone);
     if (gone) {
       untrack(req.quote.id);
       throw notCharged(`${goneMessage('payment', gone)} nothing was launched. hit REA IT again.`);
@@ -453,8 +483,9 @@ async function evmOrder(o: OrderInput, h: Hooks): Promise<OrderResult> {
   }
 
   h.step('pay');
+  const nonce = await nextNonce(wallet.address);
   const payHash = await sendEvm(wallet, { to: quote.treasury as `0x${string}`, data: utf8Hex(payMemo(quote.id)), value: BigInt(quote.amount) });
-  const pending = pendingJob(o, quote, payHash, wallet.address);
+  const pending = pendingJob(o, quote, payHash, wallet.address, undefined, nonce);
   track(pending);
   // A receipt timeout isn't a failure: the engine and the project page keep checking.
   const pr = await waitReceipt(payHash).catch(() => null);
@@ -676,7 +707,11 @@ export async function creditTopup(t: PendingTopup, opts: { onWait?: (m: string) 
       saveTopup({ ...t, needsClaim: true });
       throw friendly(claimFailure(e, `${PAID}, but your wallet dropped its rea4u tag. sign the free claim message on this page so the engine can credit it.`));
     }
-    const gone = await goneAfter(e, t.quote.chain, t.payTx, { blockhash: t.blockhash, at: sentAt(t) });
+    const gone = await goneAfter(e, t.quote.chain, t.payTx, { blockhash: t.blockhash, at: sentAt(t), from: t.payer, nonce: t.nonce });
+    if (gone === 'replaced') {
+      saveTopup({ ...t, replaced: true });
+      throw friendly(goneMessage('top-up', gone));
+    }
     if (gone) {
       clearTopup(t.quote.id);
       throw notCharged(goneMessage('top-up', gone));
@@ -696,8 +731,8 @@ export async function topUp(job: JobView, usdCents: number, h: Hooks): Promise<J
   const quoteReq: QuoteRequest = { target: job.target.url, tier: job.tier, chain: job.chain, topup: job.id, usdCents };
   h.step('quote');
   let { quote } = await getQuote(quoteReq);
-  const save = (payTx: string, blockhash?: string): PendingTopup => {
-    const t: PendingTopup = { jobId: job.id, quote, payTx, payer: p.wallet.address, ...(blockhash ? { blockhash } : {}), at: Date.now() };
+  const save = (payTx: string, blockhash?: string, nonce?: number): PendingTopup => {
+    const t: PendingTopup = { jobId: job.id, quote, payTx, payer: p.wallet.address, ...(blockhash ? { blockhash } : {}), ...(nonce !== undefined ? { nonce } : {}), at: Date.now() };
     saveTopup(t);
     return t;
   };
@@ -728,7 +763,8 @@ export async function topUp(job: JobView, usdCents: number, h: Hooks): Promise<J
     await assertPlainEvmAccount(p.wallet.address);
     if (expiringSoon(quote)) quote = (await getQuote(quoteReq)).quote;
     h.step('pay');
-    entry = save(await sendEvm(p.wallet, { to: quote.treasury as `0x${string}`, data: utf8Hex(payMemo(quote.id)), value: BigInt(quote.amount) }));
+    const nonce = await nextNonce(p.wallet.address);
+    entry = save(await sendEvm(p.wallet, { to: quote.treasury as `0x${string}`, data: utf8Hex(payMemo(quote.id)), value: BigInt(quote.amount) }), undefined, nonce);
     const r = await waitReceipt(entry.payTx).catch(() => null);
     if (r && r.status !== '0x1') {
       clearTopup(quote.id);

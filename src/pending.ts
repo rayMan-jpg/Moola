@@ -37,6 +37,8 @@ export interface PendingJob {
   chain: ChainId;
   /** Solana: the payment's recent blockhash. Once it expired with the signature unknown, nothing was charged. */
   blockhash?: string;
+  /** EVM: the payment's nonce. If the hash vanishes but the nonce got used, the wallet replaced it (speed up). */
+  nonce?: number;
   /** When the payment was sent (ms). */
   at?: number;
 }
@@ -72,6 +74,10 @@ export interface PendingTopup {
   rejected?: string;
   /** Solana: the payment's recent blockhash (see PendingJob.blockhash). */
   blockhash?: string;
+  /** EVM: the payment's nonce (see PendingJob.nonce). */
+  nonce?: number;
+  /** The wallet replaced the payment (speed up): waiting for the user to paste the new hash. */
+  replaced?: boolean;
   /** When the payment was sent (ms). */
   at?: number;
 }

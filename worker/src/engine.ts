@@ -315,7 +315,8 @@ export function anthropicEngine(client: Anthropic): EngineApi {
       await b.sessions.events.send(id, { events: [{ type: 'user.message', content: [{ type: 'text', text }] }] });
     },
     async setBudget(id, cents) {
-      await b.sessions.update(id, { budget: { type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } } });
+      // Short and single-shot: a stalled write must not land after the job lease that ordered it expired.
+      await b.sessions.update(id, { budget: { type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } } }, { maxRetries: 0, timeout: 20_000 });
     },
     async listOutputs(sessionId) {
       const out: OutputFile[] = [];
