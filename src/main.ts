@@ -2,9 +2,10 @@ import { Buffer } from 'buffer';
 (globalThis as unknown as { Buffer: typeof Buffer }).Buffer ??= Buffer;
 import './styles.css';
 import type { Wallet } from '@wallet-standard/base';
+import { VersionedTransaction } from '@solana/web3.js';
 import { coinify, validateDraft, sanitizeTicker, emojiFor, NAME_MAX, DESC_MAX, type CatalogItem } from './coinify';
 import { drawCoinArt, canvasToBlob } from './coinArt';
-import { listWallets, onWalletsChanged, connect, disconnect, signAndSend, signOnly, isMobile, walletDeeplinks, shortAddr, type Connected } from './wallet';
+import { listWallets, onWalletsChanged, connect, disconnect, signAndSend, signOnly, canSignOnly, txSignature, isMobile, walletDeeplinks, shortAddr, type Connected } from './wallet';
 import { getBalanceSol, sendRaw, waitForSignature, setCustomRpc, rpcUrls } from './rpc';
 import { LAUNCHPADS, padById } from './launchpads';
 import type { StepId } from './launchpads/types';
@@ -408,15 +409,33 @@ els.form.addEventListener('submit', async (e) => {
       onStep,
     );
     onStep('sign');
-    const sig = prepared.submit
-      ? await prepared.submit(await signOnly(wallet, prepared.tx))
-      : await signAndSend(wallet, prepared.tx, sendRaw);
+    let sig: string;
+    let rebroadcast: (() => Promise<unknown>) | undefined;
+    if (prepared.submit) {
+      sig = await prepared.submit(await signOnly(wallet, prepared.tx));
+    } else if (canSignOnly(wallet)) {
+      // Same pattern pump.fun's own site uses: the wallet signs a tx the mint already signed, we broadcast.
+      const signed = await signOnly(wallet, prepared.tx);
+      if (messageChanged(prepared.tx, signed)) {
+        throw new Error(`${wallet.wallet.name} changed the transaction while signing, which breaks the mint signature. Nothing was sent. Try again or use another wallet.`);
+      }
+      sig = txSignature(signed);
+      rebroadcast = () => sendRaw(signed);
+      try {
+        await sendRaw(signed);
+      } catch (e) {
+        // Network blips get retried by the rebroadcast loop; real rejections (bad signature, expired) surface now.
+        if (!/fetch|network|RPC 5\d\d|429/i.test(String((e as Error).message))) throw e;
+      }
+    } else {
+      sig = await signAndSend(wallet, prepared.tx, sendRaw);
+    }
     onStep('confirm');
-    const st = await waitForSignature(sig);
+    const st = await waitForSignature(sig, { rebroadcast });
     if (st.status === 'failed') throw new Error(`transaction failed on-chain: ${JSON.stringify(st.err)}`);
     setStep(null);
     els.steps.querySelectorAll('li').forEach((li) => ((li as HTMLElement).dataset.state = 'done'));
-    showResult({ mint: prepared.mint, sig, coinUrl: prepared.coinUrl, ticker: draft.ticker, pad: pad.name, pending: st.status === 'timeout' });
+    showResult({ mint: prepared.mint, sig, coinUrl: prepared.coinUrl, ticker: draft.ticker, pad: pad.name, pending: st.status === 'timeout', via: prepared.via });
     refreshBalance();
   } catch (err) {
     if ((err as Error).message === 'cancelled') {
@@ -431,7 +450,13 @@ els.form.addEventListener('submit', async (e) => {
   }
 });
 
-function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: string; pad: string; pending: boolean }) {
+function messageChanged(original: VersionedTransaction, signed: Uint8Array): boolean {
+  const a = original.message.serialize();
+  const b = VersionedTransaction.deserialize(signed).message.serialize();
+  return a.length !== b.length || a.some((x, i) => x !== b[i]);
+}
+
+function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: string; pad: string; pending: boolean; via?: string }) {
   try {
     localStorage.setItem('moola.last', JSON.stringify({ ...r, at: Date.now() }));
   } catch {
@@ -440,6 +465,7 @@ function showResult(r: { mint: string; sig: string; coinUrl: string; ticker: str
   const share = encodeURIComponent(`just launched $${r.ticker} on ${r.pad} in one click with MOOLA 🚀\n${r.coinUrl}`);
   els.form.hidden = true;
   els.result.hidden = false;
+  els.result.dataset.via = r.via ?? '';
   els.result.innerHTML = `
     <h3>$${esc(r.ticker)} IS LIVE</h3>
     <p>${r.pending ? 'sent! the chain is slow, it will show up in a few seconds.' : 'confirmed on Solana. you are now a dev. act like it.'}</p>

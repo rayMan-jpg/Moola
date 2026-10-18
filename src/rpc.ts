@@ -1,8 +1,6 @@
 // Minimal JSON-RPC helpers. Wallets broadcast for us; we only need blockhash, balance and status polling.
-export const DEFAULT_RPCS = [
-  'https://api.mainnet-beta.solana.com',
-  'https://solana-rpc.publicnode.com',
-];
+// api.mainnet-beta.solana.com answers 403 to any request with a browser Origin, so it is not listed.
+export const DEFAULT_RPCS = ['https://solana-rpc.publicnode.com'];
 
 const RPC_KEY = 'moola.rpc';
 
@@ -64,17 +62,46 @@ export function toBase64(bytes: Uint8Array): string {
 }
 
 export async function sendRaw(signed: Uint8Array): Promise<string> {
-  return rpc<string>('sendTransaction', [toBase64(signed), { encoding: 'base64', preflightCommitment: 'confirmed', maxRetries: 5 }]);
+  return rpc<string>('sendTransaction', [toBase64(signed), { encoding: 'base64', skipPreflight: true, maxRetries: 0 }]);
+}
+
+export interface SimResult {
+  err: unknown;
+  logs: string[] | null;
+  unitsConsumed?: number;
+}
+
+/** Dry-runs a transaction against live mainnet state without needing (or checking) signatures. */
+export async function simulateTx(tx: Uint8Array): Promise<SimResult> {
+  const r = await rpc<{ value: SimResult }>('simulateTransaction', [
+    toBase64(tx),
+    { encoding: 'base64', sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed' },
+  ]);
+  return r.value;
+}
+
+/** Turns a failed simulation into a readable error, or returns null if it passed. */
+export function simError(sim: SimResult): Error | null {
+  if (!sim.err) return null;
+  const logs = sim.logs ?? [];
+  const errLine = [...logs].reverse().find((l) => /Error|insufficient|failed/i.test(l)) ?? '';
+  const text = `${JSON.stringify(sim.err)} ${errLine}`;
+  if (/insufficient lamports|insufficient funds|AccountNotFound|"InsufficientFundsForRent"/i.test(text) || /Attempt to debit an account but found no record/i.test(text)) {
+    return Object.assign(new Error('not enough SOL for fees + dev buy. top up and retry.'), { friendly: true, funds: true });
+  }
+  return new Error(`launch simulation failed: ${text.slice(0, 240)}`);
 }
 
 export type TxStatus = 'confirmed' | 'failed' | 'timeout';
 
 export async function waitForSignature(
   sig: string,
-  { timeoutMs = 90_000, intervalMs = 2_000 } = {},
+  { timeoutMs = 90_000, intervalMs = 2_000, rebroadcast }: { timeoutMs?: number; intervalMs?: number; rebroadcast?: () => Promise<unknown> } = {},
 ): Promise<{ status: TxStatus; err?: unknown }> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    // Public RPCs drop transactions under load; re-sending the same signed bytes is idempotent.
+    if (rebroadcast && Date.now() - start < 60_000) rebroadcast().catch(() => undefined);
     try {
       const r = await rpc<{ value: ({ err: unknown; confirmationStatus?: string } | null)[] }>(
         'getSignatureStatuses',

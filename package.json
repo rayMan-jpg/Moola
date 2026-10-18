@@ -2,7 +2,7 @@
   "name": "moola",
   "private": true,
   "version": "0.1.0",
-  "description": "MOOLA — degen fork of ECC: turn any agent into a coin and launch it on Solana launchpads in one click.",
+  "description": "MOOLA \u2014 degen fork of ECC: turn any agent into a coin and launch it on Solana launchpads in one click.",
   "type": "module",
   "license": "MIT",
   "scripts": {
@@ -11,22 +11,27 @@
     "build": "npm run catalog && tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:sim": "node --test tests/sim/*.test.mjs",
-    "test:e2e": "playwright test"
+    "test:sim": "NODE_USE_ENV_PROXY=1 vitest run -c vitest.live.config.ts",
+    "test:e2e": "NODE_USE_ENV_PROXY=1 playwright test"
   },
   "dependencies": {
     "@fontsource/bangers": "^5.3.0",
     "@fontsource/comic-neue": "^5.3.0",
     "@fontsource/vt323": "^5.3.0",
+    "@noble/curves": "^2.4.0",
+    "@pump-fun/pump-sdk": "^4.1.0",
+    "@solana/spl-token": "^0.4.15",
     "@solana/wallet-standard-features": "^1.5.0",
     "@solana/web3.js": "^1.99.0",
     "@wallet-standard/app": "^1.1.1",
     "@wallet-standard/base": "^1.1.1",
+    "bn.js": "^5.2.5",
     "bs58": "^6.0.0",
     "buffer": "^6.0.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
+    "@types/bn.js": "^5.2.0",
     "jsdom": "^29.1.1",
     "typescript": "^5.9.3",
     "vite": "^8.3.4",

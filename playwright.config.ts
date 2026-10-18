@@ -9,6 +9,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://127.0.0.1:4173/',
     launchOptions: { executablePath: process.env.PW_CHROMIUM ?? '/opt/pw-browsers/chromium' },
+    // Sandboxed CI/dev boxes may only reach the internet through an HTTPS proxy.
+    proxy: process.env.HTTPS_PROXY ? { server: process.env.HTTPS_PROXY, bypass: '127.0.0.1,localhost' } : undefined,
     screenshot: 'only-on-failure',
     trace: 'off',
   },

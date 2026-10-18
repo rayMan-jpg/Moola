@@ -102,6 +102,15 @@ export async function signOnly(c: Connected, tx: VersionedTransaction): Promise<
   return out.signedTransaction;
 }
 
+export function canSignOnly(c: Connected): boolean {
+  return SIGN in (c.wallet.features as Feature);
+}
+
+/** First signature of a serialized transaction (the fee payer's), base58. That is the tx id. */
+export function txSignature(signed: Uint8Array): string {
+  return bs58.encode(VersionedTransaction.deserialize(signed).signatures[0]);
+}
+
 export function isMobile(ua = navigator.userAgent): boolean {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
 }

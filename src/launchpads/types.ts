@@ -21,6 +21,8 @@ export interface PreparedLaunch {
   /** Fully built transaction, already signed by any extra keypairs (e.g. a fresh mint). */
   tx: VersionedTransaction;
   coinUrl: string;
+  /** Which builder produced the transaction (for diagnostics). */
+  via?: string;
   /**
    * When set, the wallet only signs and this function broadcasts (some launchpads want the
    * signed transaction posted to their API). Otherwise the wallet signs and sends.
