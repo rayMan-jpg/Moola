@@ -203,8 +203,13 @@ test('rejecting in the wallet leaves no coin and a friendly message', async ({ p
 
 test('form validation blocks a bad ticker before anything happens', async ({ page }) => {
   const ctx = await setup(page);
+  // Slow catalog: the user edits before it lands, and the late default fill must not overwrite them.
+  await page.route('**/catalog.json', async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
   await page.goto('./');
-  await page.fill('#name', ''); // before the catalog lands: must not be overwritten by the default coin
+  await page.fill('#name', '');
   await expect(page.locator('#grid .card').first()).toBeVisible();
   await expect(page.locator('#name')).toHaveValue('');
   await page.locator('#send-it').click();

@@ -258,8 +258,9 @@ function clearErrors() {
   }
 }
 
-els.name.addEventListener('input', (e) => {
-  if (e.isTrusted) goCustom();
+// Only the user fires input events here (the app sets .value directly), so any input means "user edited".
+els.name.addEventListener('input', () => {
+  goCustom();
   updateCounts();
   scheduleArt();
   updateSummary();
@@ -276,7 +277,7 @@ function normalizeTicker() {
   if (pos !== null && document.activeElement === els.ticker) els.ticker.setSelectionRange(Math.min(pos, v.length), Math.min(pos, v.length));
 }
 els.ticker.addEventListener('input', (e) => {
-  if (e.isTrusted) goCustom();
+  goCustom();
   // Don't rewrite the value mid-composition (Android/CJK keyboards duplicate text if we do).
   if (!(e as InputEvent).isComposing) normalizeTicker();
   scheduleArt();
@@ -287,8 +288,8 @@ els.ticker.addEventListener('compositionend', () => {
   updateSummary();
 });
 els.ticker.addEventListener('blur', normalizeTicker);
-els.description.addEventListener('input', (e) => {
-  if (e.isTrusted) state.dirty = true;
+els.description.addEventListener('input', () => {
+  state.dirty = true;
   updateCounts();
 });
 for (const el of [els.twitter, els.telegram, els.website]) el.addEventListener('input', () => (state.dirty = true));
